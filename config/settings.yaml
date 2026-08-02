@@ -1,0 +1,52 @@
+# ML Service Configuration Settings
+
+app:
+  name: "NIFTY 50 ML Trading Engine"
+  version: "1.0.0"
+  env: "production"
+
+fyers:
+  app_id_env: "FYERS_APP_ID"
+  secret_key_env: "FYERS_SECRET_KEY"
+  access_token_env: "FYERS_ACCESS_TOKEN"
+  redirect_url: "http://127.0.0.1:8000/fyers/callback"
+  pin_env: "FYERS_PIN"
+  totp_key_env: "FYERS_TOTP_KEY"
+  polling_interval_seconds: 60
+  live_buffer_days: 60
+
+data:
+  raw_data_path: "data/raw/NIFTY50_Preprocessed.csv"
+  processed_dir: "data/processed"
+  live_dir: "data/live"
+  ticker_col: "Ticker"
+  date_col: "Date"
+  close_col: "Close"
+  interval: "15m"                      # 15-minute intraday candle resolution
+
+features:
+  rsi_period: 14
+  ema_short: 9
+  ema_long: 21
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  bb_std: 2.0
+  atr_period: 14
+  adx_period: 14
+  lag_periods: [1, 2, 3, 5, 10]
+  rolling_windows: [5, 10, 20]
+
+training:
+  horizon_candles: 2                   # 2 x 15-min candles = 30-minute prediction horizon!
+  n_splits: 5
+  test_size_candles: 500
+  model_registry_dir: "models/registry"
+  min_score_improvement: 0.005         # new model candidate must beat champion by 0.5%
+  retrain_schedule_cron: "0 18 * * 1-5" # 6:00 PM weekdays after Indian market close
+
+drift:
+  window_size: 50
+  mae_degradation_threshold: 0.20
+  directional_acc_threshold: 0.52
