@@ -1,6 +1,6 @@
 """
 FastAPI Service for NIFTY 50 ML Trading Model.
-Exposes REST API endpoints for live predictions, health checks, model retraining, and Fyers API OAuth auth flow.
+Exposes REST API endpoints for live predictions, health checks, model retraining, and direct Fyers API token connection.
 """
 from __future__ import annotations
 
@@ -37,6 +37,8 @@ class PredictionResponse(BaseModel):
     confidence_score: float
     regressor_version: str
     classifier_version: str
+    risk_management: Dict[str, Any]
+    analytics: Dict[str, Any]
 
 
 class TokenInput(BaseModel):
@@ -86,7 +88,7 @@ def health_check():
 
 @app.get("/fyers/login")
 def fyers_login():
-    """Redirects to Fyers OAuth 2.0 Login URL to generate an auth code."""
+    """Optional OAuth 2.0 Login redirect URL generator."""
     client = get_fyers_client()
     try:
         auth_url = client.generate_auth_url()
@@ -109,8 +111,8 @@ def fyers_callback(auth_code: str = Query(None), auth_code_param: str = Query(No
         <html>
             <body style="font-family: sans-serif; background: #0f172a; color: white; padding: 40px; text-align: center;">
                 <h1 style="color: #22c55e;">🟢 Fyers Live API Connected Successfully!</h1>
-                <p>Access token has been generated and saved to your <code>.env</code> file.</p>
-                <p><a href="/" style="color: #38bdf8; font-size: 18px; font-weight: bold;">Return to ML Trading Dashboard</a></p>
+                <p>Access token has been saved to <code>.env</code>. All users across all devices are now connected live.</p>
+                <p><a href="/" style="color: #38bdf8; font-size: 18px; font-weight: bold;">Return to Dashboard</a></p>
             </body>
         </html>
         """)
@@ -121,18 +123,18 @@ def fyers_callback(auth_code: str = Query(None), auth_code_param: str = Query(No
 
 @app.post("/fyers/token")
 def set_fyers_token(data: TokenInput):
-    """Manually submits and saves FYERS_ACCESS_TOKEN into .env."""
+    """Directly saves FYERS_ACCESS_TOKEN into .env without any browser redirect."""
     if not data.access_token.strip():
         raise HTTPException(status_code=400, detail="access_token cannot be empty.")
 
     client = get_fyers_client()
     client.save_access_token_directly(data.access_token)
-    return {"message": "FYERS_ACCESS_TOKEN updated successfully.", "is_authenticated": client.is_authenticated}
+    return {"message": "FYERS_ACCESS_TOKEN saved directly into .env successfully.", "is_authenticated": client.is_authenticated}
 
 
 @app.get("/predict/{ticker}", response_model=PredictionResponse)
 def get_prediction(ticker: str):
-    """Returns live ML prediction for a given NIFTY 50 ticker."""
+    """Returns live ML prediction & risk management analytics for a given NIFTY 50 ticker. Direct execution without any redirect."""
     try:
         prediction = run_live_prediction(ticker)
         return prediction
@@ -166,7 +168,7 @@ def trigger_retrain(background_tasks: BackgroundTasks):
 
 @app.get("/", response_class=HTMLResponse)
 def minimal_dashboard():
-    """Minimal local dashboard for testing predictions and managing Fyers API connection."""
+    """Minimal local dashboard for testing predictions and direct Fyers API token configuration."""
     sorted_tickers = sorted(list(NIFTY50_TICKERS))
     datalist_options = "".join([f'<option value="{t}"></option>' for t in sorted_tickers])
 
@@ -176,15 +178,18 @@ def minimal_dashboard():
     if client.is_authenticated:
         fyers_banner = """
         <div style="background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #4ade80; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-            <span>🟢 <strong>Fyers API Live Connected</strong> — Pulling real-time market quotes from Fyers.</span>
+            <span>🟢 <strong>Fyers API Live Connected (Central Backend)</strong> — Serving real-time predictions to all users across all devices.</span>
             <span style="font-size: 12px; background: #22c55e; color: black; padding: 2px 8px; border-radius: 12px; font-weight: bold;">LIVE ACTIVE</span>
         </div>
         """
     elif client.app_id and not client.access_token:
         fyers_banner = f"""
-        <div style="background: rgba(234, 179, 8, 0.15); border: 1px solid #eab308; color: #fde047; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-            <span>🔑 <strong>Fyers App ID Found ({client.app_id[:6]}...)</strong> — Generate Access Token to enable Live Fyers Tracking.</span>
-            <a href="/fyers/login" target="_blank" style="background: #eab308; color: black; padding: 6px 14px; border-radius: 6px; text-decoration: none; font-weight: bold;">Connect Fyers Live</a>
+        <div style="background: rgba(234, 179, 8, 0.15); border: 1px solid #eab308; color: #fde047; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+            <div style="margin-bottom: 10px;">🔑 <strong>Fyers App ID Configured ({client.app_id[:6]}...)</strong> — Paste FYERS_ACCESS_TOKEN below to connect directly without any redirect:</div>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="directTokenInput" placeholder="Paste FYERS_ACCESS_TOKEN directly here..." style="flex-grow: 1; padding: 8px 12px; background: #0f172a; border: 1px solid #eab308; color: white; border-radius: 6px;">
+                <button onclick="saveTokenDirectly()" style="background: #eab308; color: black; padding: 8px 16px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer;">Connect Direct Token</button>
+            </div>
         </div>
         """
     else:
@@ -233,12 +238,12 @@ def minimal_dashboard():
     </head>
     <body>
         <div class="container">
-            <h1>📈 NIFTY 50 ML Trading Engine (Live Inference & Monitoring)</h1>
+            <h1>📈 NIFTY 50 ML Trading Engine (Live Direct Connection)</h1>
             
             {fyers_banner}
 
             <div class="card">
-                <h3>Single Ticker Live Prediction (NIFTY 50 Only)</h3>
+                <h3>Single Ticker Live Prediction & Risk Analytics</h3>
                 <div class="flex">
                     <input type="text" id="tickerInput" list="niftyTickers" value="WIPRO" placeholder="Select or type NIFTY 50 ticker (e.g. WIPRO, Tata Steel, Reliance)">
                     <datalist id="niftyTickers">
@@ -246,7 +251,7 @@ def minimal_dashboard():
                     </datalist>
                     <button onclick="getPrediction()">Run ML Model</button>
                 </div>
-                <div class="info-text">💡 Tip: Model is trained exclusively on NIFTY 50 constituents. Typing variations like "Tata Steel" automatically resolves to "TATASTEEL".</div>
+                <div class="info-text">💡 Direct API execution without any login redirect for end-users on any device.</div>
             </div>
 
             <div id="errorCard" class="error-card">
@@ -277,7 +282,7 @@ def minimal_dashboard():
                         <div class="metric-val" id="resConfidence">0.00</div>
                     </div>
                 </div>
-                <h4>Raw Model Response:</h4>
+                <h4>Complete Response JSON (Predictions + Risk Analytics):</h4>
                 <pre id="jsonResult"></pre>
             </div>
 
@@ -291,6 +296,23 @@ def minimal_dashboard():
         </div>
 
         <script>
+            async function saveTokenDirectly() {{
+                const token = document.getElementById('directTokenInput').value.trim();
+                if (!token) {{ alert('Please paste FYERS_ACCESS_TOKEN first.'); return; }}
+                try {{
+                    const res = await fetch('/fyers/token', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ access_token: token }})
+                    }});
+                    const data = await res.json();
+                    alert(data.message || 'Token updated.');
+                    window.location.reload();
+                }} catch(e) {{
+                    alert('Error saving token: ' + e);
+                }}
+            }}
+
             async function getPrediction() {{
                 const ticker = document.getElementById('tickerInput').value.trim() || 'WIPRO';
                 document.getElementById('errorCard').style.display = 'none';

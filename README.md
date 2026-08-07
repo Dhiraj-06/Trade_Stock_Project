@@ -75,7 +75,7 @@ python scripts/run_training.py
 Start the live FastAPI uvicorn server:
 
 ```bash
-uvicorn api.app:app --host 0.0.0.0 --port 8000 --reload
+uvicorn api.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 - **Live Test Dashboard**: Open [http://127.0.0.1:8000/](http://127.0.0.1:8000/) in your browser.

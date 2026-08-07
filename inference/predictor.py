@@ -1,7 +1,11 @@
 """
 Predictor interface for live inference.
 Loads active champion models from registry and executes inference on scale-invariant feature vectors.
-Generates comprehensive risk factor analytics and UI display parameters.
+Implements the 4 Core Risk Management & Quality Features:
+  1. Dynamic ATR-based Stop Loss, Target Prices, and Risk/Reward Guard.
+  2. Dynamic Position Sizing (Capital Risk Allocation).
+  3. Key Levels & Pullback Guard (Support/Resistance checks).
+  4. Volume Strength & Multi-Indicator Confluence (RSI Overbought/Oversold Guards).
 """
 from __future__ import annotations
 
@@ -38,7 +42,7 @@ class Predictor:
     def predict(self, feature_df: pd.DataFrame, current_price: float) -> dict[str, Any]:
         """Takes a DataFrame containing scale-invariant feature columns (last row is used for inference).
 
-        Returns structured dictionary containing ML predictions and all 9 UI risk parameters.
+        Returns structured dictionary containing ML predictions, Risk Management rules, and UI analytics.
         """
         if self.reg_model is None or self.clf_model is None:
             self.reload_champions()
@@ -54,25 +58,104 @@ class Predictor:
         last_row = feature_df[expected_cols].tail(1)
         full_last_row = feature_df.iloc[-1].to_dict()
 
-        # 1. Regressor prediction
+        # 1. Regressor prediction (expected return %)
         pred_return_pct = float(self.reg_model.predict(last_row)[0])
         pred_price = float(current_price * (1 + pred_return_pct / 100.0))
 
-        # 2. Classifier prediction
+        # 2. Classifier prediction (direction probability)
         if hasattr(self.clf_model, "predict_proba"):
             proba_up = float(self.clf_model.predict_proba(last_row)[0, 1])
         else:
             proba_up = 0.5
 
-        direction = "UP" if proba_up >= 0.5 else "DOWN"
+        raw_direction = "UP" if proba_up >= 0.5 else "DOWN"
         confidence_score = round(abs(proba_up - 0.5) * 2.0, 4)  # Bounded [0.0, 1.0]
 
-        # 3. Calculate Risk Factors & UI Display Analytics
-        # AI Recommendation
-        if confidence_score >= 0.10:
-            ai_recommendation = "BUY CALL" if direction == "UP" else "BUY PUT"
+        # Extract indicator values for risk management rules
+        rsi_14 = float(full_last_row.get("rsi", 50.0))
+        atr_ratio = float(full_last_row.get("atr_ratio", 0.015))
+        atr_points = round(max(0.5, current_price * atr_ratio), 2)
+        vol_ratio_20 = float(full_last_row.get("volume_ratio_20", 1.0))
+        volatility_20_pct = float(full_last_row.get("volatility_20", 0.015) * 100.0)
+
+        bb_lower_ratio = float(full_last_row.get("bb_lower_ratio", -0.02))
+        bb_upper_ratio = float(full_last_row.get("bb_upper_ratio", 0.02))
+        support_20 = round(current_price * (1.0 + bb_lower_ratio), 2)
+        resistance_20 = round(current_price * (1.0 + bb_upper_ratio), 2)
+
+        # ----------------------------------------------------------------------
+        # RISK MANAGEMENT RULE 1: Dynamic ATR Stop Loss & Risk/Reward Guard
+        # ----------------------------------------------------------------------
+        if raw_direction == "UP":
+            atr_target_price = round(current_price + (1.5 * atr_points), 2)
+            atr_stop_loss = round(current_price - (1.5 * atr_points), 2)
         else:
-            ai_recommendation = "WAIT"
+            atr_target_price = round(current_price - (1.5 * atr_points), 2)
+            atr_stop_loss = round(current_price + (1.5 * atr_points), 2)
+
+        risk_amount = abs(current_price - atr_stop_loss)
+        reward_amount = abs(atr_target_price - current_price)
+        rr_ratio = round(reward_amount / max(0.01, risk_amount), 2)
+        risk_reward_str = f"1:{rr_ratio}"
+        passes_risk_reward_guard = bool(rr_ratio >= 1.4)
+
+        # ----------------------------------------------------------------------
+        # RISK MANAGEMENT RULE 2: Dynamic Position Sizing (Capital Allocation)
+        # ----------------------------------------------------------------------
+        if confidence_score >= 0.30 and volatility_20_pct < 2.0 and proba_up not in [0.5]:
+            capital_allocation_pct = 100
+            position_size_label = "🟢 100% Capital Allocation (Full Position)"
+            risk_rating = "LOW"
+        elif confidence_score >= 0.15:
+            capital_allocation_pct = 50
+            position_size_label = "🟡 50% Capital Allocation (Reduced Risk Position)"
+            risk_rating = "MEDIUM"
+        else:
+            capital_allocation_pct = 0
+            position_size_label = "🔴 0% Allocation (Do Not Trade / Wait)"
+            risk_rating = "HIGH"
+
+        # ----------------------------------------------------------------------
+        # RISK MANAGEMENT RULE 3: Key Levels & Pullback Guard
+        # ----------------------------------------------------------------------
+        near_resistance = bool(raw_direction == "UP" and (resistance_20 - current_price) < (0.5 * atr_points))
+        near_support = bool(raw_direction == "DOWN" and (current_price - support_20) < (0.5 * atr_points))
+        
+        entry_low = round(max(support_20, current_price * 0.998), 2)
+        entry_high = round(min(resistance_20, current_price * 1.002), 2)
+        suggested_entry_zone = f"₹{entry_low} - ₹{entry_high}"
+
+        # ----------------------------------------------------------------------
+        # RISK MANAGEMENT RULE 4: Volume Strength & Momentum Confluence Guard
+        # ----------------------------------------------------------------------
+        high_volume_confirmation = bool(vol_ratio_20 > 1.1)
+        rsi_overbought = bool(rsi_14 > 75.0)
+        rsi_oversold = bool(rsi_14 < 25.0)
+
+        # ----------------------------------------------------------------------
+        # FINAL AI RECOMMENDATION SYNTHESIS & OVERRIDES
+        # ----------------------------------------------------------------------
+        override_reason = None
+        if capital_allocation_pct == 0:
+            final_recommendation = "WAIT"
+            override_reason = "Model Confidence too low (Market in noise zone)"
+        elif not passes_risk_reward_guard:
+            final_recommendation = "WAIT (Poor Risk/Reward Ratio)"
+            override_reason = f"Risk/Reward Ratio ({risk_reward_str}) is below minimum threshold 1:1.5"
+        elif near_resistance and raw_direction == "UP":
+            final_recommendation = f"WAIT for Pullback to Entry Zone ({suggested_entry_zone})"
+            override_reason = "Price is near 20-candle Resistance level"
+        elif near_support and raw_direction == "DOWN":
+            final_recommendation = f"WAIT for Pullback to Entry Zone ({suggested_entry_zone})"
+            override_reason = "Price is near 20-candle Support level"
+        elif rsi_overbought and raw_direction == "UP":
+            final_recommendation = "BUY CALL (Caution: RSI Overbought > 75)"
+            override_reason = "RSI is in extreme overbought territory"
+        elif rsi_oversold and raw_direction == "DOWN":
+            final_recommendation = "BUY PUT (Caution: RSI Oversold < 25)"
+            override_reason = "RSI is in extreme oversold territory"
+        else:
+            final_recommendation = "BUY CALL" if raw_direction == "UP" else "BUY PUT"
 
         # Market Trend
         ema_short_ratio = float(full_last_row.get("ema_short_ratio", 0.0))
@@ -86,59 +169,54 @@ class Predictor:
         else:
             market_trend = "Bearish"
 
-        # Momentum & Oscillators
-        rsi_14 = float(full_last_row.get("rsi", 50.0))
         macd_ratio = float(full_last_row.get("macd_ratio", 0.0))
         macd_signal_ratio = float(full_last_row.get("macd_signal_ratio", 0.0))
         macd_status = "Positive (Buying Confirmation)" if macd_ratio > macd_signal_ratio else "Negative (Selling Pressure)"
         trade_score = int(np.clip(50 + (rsi_14 - 50) * 0.5 + (confidence_score * 40), 10, 99))
 
-        # Expected Move & Stop Loss
-        atr_ratio = float(full_last_row.get("atr_ratio", 0.015))
-        atr_points = round(current_price * atr_ratio, 2)
-        if direction == "UP":
-            suggested_stop_loss = round(current_price - (1.5 * atr_points), 2)
-        else:
-            suggested_stop_loss = round(current_price + (1.5 * atr_points), 2)
-
-        entry_low = round(current_price * 0.998, 2)
-        entry_high = round(current_price * 1.002, 2)
-        suggested_entry_zone = f"₹{entry_low} - ₹{entry_high}"
-
-        # Key Levels (Support & Resistance)
-        bb_lower_ratio = float(full_last_row.get("bb_lower_ratio", -0.02))
-        bb_upper_ratio = float(full_last_row.get("bb_upper_ratio", 0.02))
-        support_20 = round(current_price * (1.0 + bb_lower_ratio), 2)
-        resistance_20 = round(current_price * (1.0 + bb_upper_ratio), 2)
-
-        # Volume Strength
-        vol_ratio = float(full_last_row.get("volume_ratio_20", 1.0))
-        high_volume_confirmation = bool(vol_ratio > 1.1)
-
-        # Volatility & Risk Rating
-        volatility_20_pct = float(full_last_row.get("volatility_20", 0.015) * 100.0)
-        if confidence_score >= 0.30 and volatility_20_pct < 2.0:
-            risk_rating = "LOW"
-        elif confidence_score >= 0.15:
-            risk_rating = "MEDIUM"
-        else:
-            risk_rating = "HIGH"
-
-        # Drawdown & Risk/Reward Guard
         drawdown_50_pct = round(abs(float(full_last_row.get("pct_from_high_watermark", -0.05))) * 100.0, 2)
 
         return {
             "predicted_return_pct": round(pred_return_pct, 4),
             "predicted_price": round(pred_price, 2),
-            "direction": direction,
+            "direction": raw_direction,
             "proba_up": round(proba_up, 4),
             "confidence_score": confidence_score,
             "regressor_version": self.reg_meta.get("version", "unknown"),
             "classifier_version": self.clf_meta.get("version", "unknown"),
 
-            # Extended Risk Factors & Analytics Parameters for Frontend
+            # 4 Core Risk Management Features
+            "risk_management": {
+                "dynamic_stop_loss": atr_stop_loss,
+                "dynamic_target_price": atr_target_price,
+                "atr_14_points": atr_points,
+                "risk_reward_ratio": risk_reward_str,
+                "passes_risk_reward_guard": passes_risk_reward_guard,
+                "position_sizing": {
+                    "capital_allocation_pct": capital_allocation_pct,
+                    "position_size_label": position_size_label,
+                },
+                "key_levels_guard": {
+                    "support_20": support_20,
+                    "resistance_20": resistance_20,
+                    "near_resistance": near_resistance,
+                    "near_support": near_support,
+                    "suggested_entry_zone": suggested_entry_zone,
+                },
+                "confluence_guard": {
+                    "volume_ratio_20": round(vol_ratio_20, 2),
+                    "high_volume_confirmation": high_volume_confirmation,
+                    "rsi_14": round(rsi_14, 2),
+                    "rsi_overbought": rsi_overbought,
+                    "rsi_oversold": rsi_oversold,
+                },
+                "override_reason": override_reason,
+            },
+
+            # Extended Risk Factors & Analytics Parameters for Frontend UI
             "analytics": {
-                "ai_recommendation": ai_recommendation,
+                "ai_recommendation": final_recommendation,
+                "raw_direction": raw_direction,
                 "market_trend": market_trend,
                 "trade_score": trade_score,
                 "momentum": {
@@ -147,26 +225,28 @@ class Predictor:
                 },
                 "expected_move": {
                     "atr_14_points": atr_points,
-                    "target_price": round(pred_price, 2),
-                    "stop_loss_price": suggested_stop_loss,
+                    "target_price": atr_target_price,
+                    "stop_loss_price": atr_stop_loss,
                     "suggested_entry_zone": suggested_entry_zone,
                     "duration": "30 Mins",
                 },
                 "key_levels": {
                     "support_20": support_20,
                     "resistance_20": resistance_20,
-                    "entry_advice": "Enter in suggested range with proper risk management" if ai_recommendation != "WAIT" else "Wait for pullback near support",
+                    "entry_advice": "Enter in suggested range with proper risk management" if "WAIT" not in final_recommendation else override_reason or "Wait for pullback near support",
                 },
                 "volume_strength": {
-                    "volume_ratio_20": round(vol_ratio, 2),
+                    "volume_ratio_20": round(vol_ratio_20, 2),
                     "high_volume_confirmation": high_volume_confirmation,
-                    "description": f"Volume is {round(vol_ratio, 2)}x 20-candle average",
+                    "description": f"Volume is {round(vol_ratio_20, 2)}x 20-candle average",
                 },
                 "risk_rating": risk_rating,
+                "position_sizing": position_size_label,
                 "volatility_20_pct": round(volatility_20_pct, 2),
                 "risk_reward_guard": {
                     "drawdown_50_pct": drawdown_50_pct,
-                    "risk_reward_ratio": "1:1.8",
+                    "risk_reward_ratio": risk_reward_str,
+                    "passes_guard": passes_risk_reward_guard,
                 },
                 "ltp_change": {
                     "current_price": current_price,
