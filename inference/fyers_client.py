@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import numpy as np
@@ -108,26 +109,16 @@ class FyersLiveClient:
         else:
             self.is_authenticated = False
             self.fyers_model = None
-            if self.app_id and not self.access_token:
-                logger.info("Fyers App ID found in .env, but FYERS_ACCESS_TOKEN is missing/cleared. 1-Click login ready.")
-            else:
-                logger.info("Fyers credentials not configured in env. Running in Mock/Dry-Run mode.")
 
     def generate_auth_url(self) -> str:
-        """Generates Fyers OAuth 2.0 login URL for user authentication."""
+        """Generates clean Fyers OAuth 2.0 login URL with valid state parameter."""
         if not self.app_id or not self.secret_key:
             raise ValueError("FYERS_APP_ID and FYERS_SECRET_KEY must be set in .env before generating login URL.")
 
-        from fyers_apiv3 import fyersModel
-
-        session = fyersModel.SessionModel(
-            client_id=self.app_id,
-            secret_key=self.secret_key,
-            redirect_uri=FYERS.redirect_url,
-            response_type="code",
-            grant_type="authorization_code"
-        )
-        return session.generate_authcode()
+        clean_app_id = self.app_id.strip()
+        clean_redirect_uri = FYERS.redirect_url.strip()
+        encoded_redirect = urllib.parse.quote_plus(clean_redirect_uri)
+        return f"https://api-t1.fyers.in/api/v3/generate-authcode?client_id={clean_app_id}&redirect_uri={encoded_redirect}&response_type=code&state=fyers_auth"
 
     def exchange_code_for_token(self, auth_code: str) -> str:
         """Exchanges auth_code for access_token, saves to .env, and initializes live connection."""

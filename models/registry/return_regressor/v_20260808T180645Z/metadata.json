@@ -103,6 +103,5 @@
     "volume_ratio_lag_5",
     "vwap_ratio"
   ],
-  "is_champion": true,
-  "promoted_at": "2026-08-08T18:06:45.501484+00:00"
+  "is_champion": false
 }

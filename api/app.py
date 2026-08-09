@@ -1,6 +1,7 @@
 """
 FastAPI Service for NIFTY 50 ML Trading Model.
 Exposes REST API endpoints for live predictions, health checks, model retraining, and direct Fyers API token connection.
+Features automated background startup initialization.
 """
 from __future__ import annotations
 
@@ -43,6 +44,18 @@ class PredictionResponse(BaseModel):
 
 class TokenInput(BaseModel):
     access_token: str
+
+
+@app.on_event("startup")
+def startup_event():
+    """Automated backend startup task: initializes Fyers client and champion ML models in background."""
+    logger.info("Initializing NIFTY 50 ML Engine Backend Server...")
+    try:
+        client = get_fyers_client()
+        client.reload_and_init()
+        logger.info("Fyers Backend Client initialized (authenticated=%s)", client.is_authenticated)
+    except Exception as e:
+        logger.warning("Fyers Backend Client startup warning: %s", e)
 
 
 @app.get("/health")
@@ -185,10 +198,13 @@ def minimal_dashboard():
     elif client.app_id and not client.access_token:
         fyers_banner = f"""
         <div style="background: rgba(234, 179, 8, 0.15); border: 1px solid #eab308; color: #fde047; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
-            <div style="margin-bottom: 10px;">🔑 <strong>Fyers App ID Configured ({client.app_id[:6]}...)</strong> — Paste FYERS_ACCESS_TOKEN below to connect directly without any redirect:</div>
+            <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+                <span>🔑 <strong>Fyers App ID Configured ({client.app_id[:6]}...)</strong> — Today's 24-hour Fyers Access Token is required:</span>
+                <a href="/fyers/login" target="_blank" style="background: #eab308; color: black; padding: 6px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px;">⚡ 1-Click Fyers Login</a>
+            </div>
             <div style="display: flex; gap: 10px;">
-                <input type="text" id="directTokenInput" placeholder="Paste FYERS_ACCESS_TOKEN directly here..." style="flex-grow: 1; padding: 8px 12px; background: #0f172a; border: 1px solid #eab308; color: white; border-radius: 6px;">
-                <button onclick="saveTokenDirectly()" style="background: #eab308; color: black; padding: 8px 16px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer;">Connect Direct Token</button>
+                <input type="text" id="directTokenInput" placeholder="Or paste FYERS_ACCESS_TOKEN directly here..." style="flex-grow: 1; padding: 8px 12px; background: #0f172a; border: 1px solid #eab308; color: white; border-radius: 6px;">
+                <button onclick="saveTokenDirectly()" style="background: #eab308; color: black; padding: 8px 16px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer;">Save Direct Token</button>
             </div>
         </div>
         """
