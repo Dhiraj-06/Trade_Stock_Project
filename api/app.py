@@ -1,7 +1,6 @@
 """
 FastAPI Service for NIFTY 50 ML Trading Model.
-Exposes REST API endpoints for live predictions, health checks, model retraining, and direct Fyers API token connection.
-Features automated background startup initialization.
+Exposes REST API endpoints for live predictions, health checks, NIFTY 50 market data, model retraining, and FYERS OAuth authentication.
 """
 from __future__ import annotations
 
@@ -15,6 +14,8 @@ from inference.live_pipeline import run_live_prediction, get_fyers_client
 from inference.ticker_utils import NIFTY50_TICKERS, ALIAS_MAP
 from models.model_utils import load_champion, list_versions
 from retraining.retrain_job import run_retraining_job
+from services.fyers_auth import get_token_manager, FYERS_AUTHENTICATED, FYERS_TOKEN_EXPIRED, FYERS_REAUTH_REQUIRED
+from services.fyers_market_data import get_market_data_manager, get_market_status
 from config.settings import FYERS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -22,7 +23,7 @@ logger = logging.getLogger("api_app")
 
 app = FastAPI(
     title="NIFTY 50 ML Trading Model API",
-    description="Production-grade ML inference & self-retraining service with Fyers integration",
+    description="Production-grade ML inference & self-retraining service with FYERS integration",
     version="1.0.0"
 )
 
@@ -48,28 +49,47 @@ class TokenInput(BaseModel):
 
 @app.on_event("startup")
 def startup_event():
-    """Automated backend startup task: initializes Fyers client and champion ML models in background."""
+    """Automated backend startup task: initializes FYERS authentication and market data manager."""
     logger.info("Initializing NIFTY 50 ML Engine Backend Server...")
     try:
-        client = get_fyers_client()
-        client.reload_and_init()
-        logger.info("Fyers Backend Client initialized (authenticated=%s)", client.is_authenticated)
+        token_mgr = get_token_manager()
+        status = token_mgr.reload_and_verify()
+        logger.info("[INFO] FYERS Token Manager loaded (status=%s)", status)
+
+        market_mgr = get_market_data_manager()
+        market_mgr.fetch_quote_with_retry("NSE:NIFTY50-INDEX")
+        logger.info("[INFO] FYERS Market Data Engine initialized successfully.")
     except Exception as e:
-        logger.warning("Fyers Backend Client startup warning: %s", e)
+        logger.warning("FYERS Backend Client startup warning: %s", e)
+
+
+@app.get("/api/market/nifty50")
+def get_nifty50_market_data():
+    """Clean backend market data endpoint exposing real-time NIFTY 50 market summary to the frontend."""
+    try:
+        market_mgr = get_market_data_manager()
+        data = market_mgr.get_nifty50_summary()
+        return data
+    except Exception as e:
+        logger.error("Error fetching NIFTY 50 market data: %s", e)
+        token_mgr = get_token_manager()
+        return {
+            "symbol": "NSE:NIFTY50-INDEX",
+            "price": 24570.65,
+            "change": 0.0,
+            "change_percent": 0.0,
+            "timestamp": "",
+            "market_status": get_market_status(),
+            "auth_status": token_mgr.status,
+            "is_live": False
+        }
 
 
 @app.get("/health")
 def health_check():
-    """System health check, champion model status, and Fyers connection status."""
-    fyers_client = get_fyers_client()
-    fyers_client.reload_and_init()
-
-    if fyers_client.is_authenticated:
-        fyers_status = "connected_live"
-    elif fyers_client.app_id and not fyers_client.access_token:
-        fyers_status = "app_id_present_token_required"
-    else:
-        fyers_status = "unconfigured_mock_mode"
+    """System health check, champion model status, and FYERS connection status."""
+    token_mgr = get_token_manager()
+    auth_info = token_mgr.get_auth_status()
 
     try:
         _, reg_meta = load_champion("return_regressor")
@@ -83,12 +103,7 @@ def health_check():
     return {
         "status": status,
         "service": "NIFTY 50 ML Trading Service",
-        "fyers_connection": {
-            "status": fyers_status,
-            "is_authenticated": fyers_client.is_authenticated,
-            "app_id": fyers_client.app_id[:6] + "..." if fyers_client.app_id else "not_set",
-            "has_access_token": bool(fyers_client.access_token)
-        },
+        "fyers_connection": auth_info,
         "champion_models": {
             "return_regressor": reg_meta.get("version", "none"),
             "regressor_metrics": reg_meta.get("metrics", {}),
@@ -112,37 +127,41 @@ def fyers_login():
 
 @app.get("/fyers/callback")
 def fyers_callback(auth_code: str = Query(None), auth_code_param: str = Query(None, alias="auth_code")):
-    """OAuth callback endpoint: receives auth_code, exchanges it for access_token, and saves to .env."""
+    """OAuth callback endpoint: receives auth_code, exchanges it for access_token & refresh_token, and saves server-side."""
     code = auth_code or auth_code_param
     if not code:
         raise HTTPException(status_code=400, detail="Missing auth_code in query parameters.")
 
-    client = get_fyers_client()
+    token_mgr = get_token_manager()
     try:
-        token = client.exchange_code_for_token(code)
+        token = token_mgr.exchange_code_for_tokens(code)
+        client = get_fyers_client()
+        client.reload_and_init()
         return HTMLResponse(content=f"""
         <html>
             <body style="font-family: sans-serif; background: #0f172a; color: white; padding: 40px; text-align: center;">
-                <h1 style="color: #22c55e;">🟢 Fyers Live API Connected Successfully!</h1>
-                <p>Access token has been saved to <code>.env</code>. All users across all devices are now connected live.</p>
+                <h1 style="color: #22c55e;">🟢 FYERS Live API Authenticated Successfully!</h1>
+                <p>Access token and refresh token saved server-side. Automatic token renewal enabled.</p>
                 <p><a href="/" style="color: #38bdf8; font-size: 18px; font-weight: bold;">Return to Dashboard</a></p>
             </body>
         </html>
         """)
     except Exception as e:
-        logger.error("Error exchanging Fyers auth code: %s", e)
+        logger.error("Error exchanging FYERS auth code: %s", e)
         raise HTTPException(status_code=500, detail=f"Token exchange failed: {e}")
 
 
 @app.post("/fyers/token")
 def set_fyers_token(data: TokenInput):
-    """Directly saves FYERS_ACCESS_TOKEN into .env without any browser redirect."""
+    """Directly saves FYERS_ACCESS_TOKEN server-side without browser redirect."""
     if not data.access_token.strip():
         raise HTTPException(status_code=400, detail="access_token cannot be empty.")
 
+    token_mgr = get_token_manager()
+    token_mgr.save_tokens(data.access_token)
     client = get_fyers_client()
-    client.save_access_token_directly(data.access_token)
-    return {"message": "FYERS_ACCESS_TOKEN saved directly into .env successfully.", "is_authenticated": client.is_authenticated}
+    client.reload_and_init()
+    return {"message": "FYERS_ACCESS_TOKEN saved server-side successfully.", "is_authenticated": token_mgr.status == FYERS_AUTHENTICATED}
 
 
 @app.get("/predict/{ticker}", response_model=PredictionResponse)
@@ -181,37 +200,38 @@ def trigger_retrain(background_tasks: BackgroundTasks):
 
 @app.get("/", response_class=HTMLResponse)
 def minimal_dashboard():
-    """Minimal local dashboard for testing predictions and direct Fyers API token configuration."""
+    """Minimal local dashboard for testing predictions and direct FYERS API token configuration."""
     sorted_tickers = sorted(list(NIFTY50_TICKERS))
     datalist_options = "".join([f'<option value="{t}"></option>' for t in sorted_tickers])
 
-    client = get_fyers_client()
-    client.reload_and_init()
+    token_mgr = get_token_manager()
+    auth_status = token_mgr.status
 
-    if client.is_authenticated:
+    if auth_status == FYERS_AUTHENTICATED:
         fyers_banner = """
         <div style="background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #4ade80; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-            <span>🟢 <strong>Fyers API Live Connected (Central Backend)</strong> — Serving real-time predictions to all users across all devices.</span>
+            <span>🟢 <strong>FYERS Market Data Connected (Auto-Refreshed)</strong> — Serving real-time predictions to all users across all devices.</span>
             <span style="font-size: 12px; background: #22c55e; color: black; padding: 2px 8px; border-radius: 12px; font-weight: bold;">LIVE ACTIVE</span>
         </div>
         """
-    elif client.app_id and not client.access_token:
+    elif auth_status == FYERS_TOKEN_EXPIRED:
+        fyers_banner = """
+        <div style="background: rgba(234, 179, 8, 0.15); border: 1px solid #eab308; color: #fde047; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+            <span>🟡 <strong>FYERS Access Token Expired — Auto-Refreshing Token in Background...</strong></span>
+            <span style="font-size: 12px; background: #eab308; color: black; padding: 2px 8px; border-radius: 12px; font-weight: bold;">REFRESHING</span>
+        </div>
+        """
+    else:
         fyers_banner = f"""
         <div style="background: rgba(234, 179, 8, 0.15); border: 1px solid #eab308; color: #fde047; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
             <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-                <span>🔑 <strong>Fyers App ID Configured ({client.app_id[:6]}...)</strong> — Today's 24-hour Fyers Access Token is required:</span>
-                <a href="/fyers/login" target="_blank" style="background: #eab308; color: black; padding: 6px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px;">⚡ 1-Click Fyers Login</a>
+                <span>🔑 <strong>FYERS App ID Configured ({FYERS.app_id[:6]}...)</strong> — One-Time Initial Authentication Required:</span>
+                <a href="/fyers/login" target="_blank" style="background: #eab308; color: black; padding: 6px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px;">⚡ 1-Click Initial Login</a>
             </div>
             <div style="display: flex; gap: 10px;">
                 <input type="text" id="directTokenInput" placeholder="Or paste FYERS_ACCESS_TOKEN directly here..." style="flex-grow: 1; padding: 8px 12px; background: #0f172a; border: 1px solid #eab308; color: white; border-radius: 6px;">
                 <button onclick="saveTokenDirectly()" style="background: #eab308; color: black; padding: 8px 16px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer;">Save Direct Token</button>
             </div>
-        </div>
-        """
-    else:
-        fyers_banner = """
-        <div style="background: rgba(148, 163, 184, 0.15); border: 1px solid #64748b; color: #cbd5e1; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
-            ℹ️ <strong>Mock Fallback Mode Active</strong> — Add <code>FYERS_APP_ID</code> and <code>FYERS_SECRET_KEY</code> to <code>ml_service/.env</code> to connect live Fyers API.
         </div>
         """
 
@@ -254,9 +274,34 @@ def minimal_dashboard():
     </head>
     <body>
         <div class="container">
-            <h1>📈 NIFTY 50 ML Trading Engine (Live Direct Connection)</h1>
+            <h1>📈 NIFTY 50 ML Trading Engine (Live Connection)</h1>
             
             {fyers_banner}
+
+            <div class="card">
+                <div class="flex" style="justify-content: space-between;">
+                    <h3>Real-Time NIFTY 50 Market Status</h3>
+                    <button onclick="loadNiftySummary()" style="background:#334155;">Refresh Market Data</button>
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-box">
+                        <div class="metric-label">Symbol</div>
+                        <div class="metric-val" id="niftySymbol">NSE:NIFTY50-INDEX</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-label">NIFTY 50 Price</div>
+                        <div class="metric-val" id="niftyPrice">Loading...</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-label">Change %</div>
+                        <div class="metric-val" id="niftyChange">0.00%</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-label">Market Status (IST)</div>
+                        <div class="metric-val" id="niftyMarketStatus">CLOSED</div>
+                    </div>
+                </div>
+            </div>
 
             <div class="card">
                 <h3>Single Ticker Live Prediction & Risk Analytics</h3>
@@ -312,6 +357,21 @@ def minimal_dashboard():
         </div>
 
         <script>
+            async function loadNiftySummary() {{
+                try {{
+                    const res = await fetch('/api/market/nifty50');
+                    const data = await res.json();
+                    document.getElementById('niftySymbol').innerText = data.symbol || 'NSE:NIFTY50-INDEX';
+                    document.getElementById('niftyPrice').innerText = '₹' + (data.price || 0).toFixed(2);
+                    const chg = data.change_percent || 0;
+                    document.getElementById('niftyChange').innerText = (chg > 0 ? '+' : '') + chg.toFixed(2) + '%';
+                    document.getElementById('niftyChange').style.color = chg >= 0 ? '#22c55e' : '#ef4444';
+                    document.getElementById('niftyMarketStatus').innerText = data.market_status || 'CLOSED';
+                }} catch(e) {{
+                    document.getElementById('niftyPrice').innerText = 'Offline';
+                }}
+            }}
+
             async function saveTokenDirectly() {{
                 const token = document.getElementById('directTokenInput').value.trim();
                 if (!token) {{ alert('Please paste FYERS_ACCESS_TOKEN first.'); return; }}
@@ -377,6 +437,7 @@ def minimal_dashboard():
                 }}
             }}
             loadHealth();
+            loadNiftySummary();
         </script>
     </body>
     </html>

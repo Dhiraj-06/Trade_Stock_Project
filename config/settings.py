@@ -26,7 +26,9 @@ class FyersSettings:
     app_id: str = os.getenv("FYERS_APP_ID", "").strip()
     secret_key: str = os.getenv("FYERS_SECRET_KEY", "").strip()
     access_token: str = os.getenv("FYERS_ACCESS_TOKEN", "").strip()
+    refresh_token: str = os.getenv("FYERS_REFRESH_TOKEN", "").strip()
     redirect_url: str = _raw_config.get("fyers", {}).get("redirect_url", "http://127.0.0.1:8000/fyers/callback")
+    token_store_path: Path = BASE_DIR / "data" / "live" / "fyers_tokens.json"
     pin: str = os.getenv("FYERS_PIN", "").strip()
     totp_key: str = os.getenv("FYERS_TOTP_KEY", "").strip()
     polling_interval: int = _raw_config.get("fyers", {}).get("polling_interval_seconds", 60)
@@ -37,6 +39,7 @@ class FyersSettings:
         self.app_id = os.getenv("FYERS_APP_ID", "").strip()
         self.secret_key = os.getenv("FYERS_SECRET_KEY", "").strip()
         self.access_token = os.getenv("FYERS_ACCESS_TOKEN", "").strip()
+        self.refresh_token = os.getenv("FYERS_REFRESH_TOKEN", "").strip()
         self.pin = os.getenv("FYERS_PIN", "").strip()
         self.totp_key = os.getenv("FYERS_TOTP_KEY", "").strip()
 

@@ -1,63 +1,57 @@
 {
-  "model_name": "direction_classifier",
-  "version": "v_20260809T053900Z",
-  "timestamp": "20260809T053900Z",
+  "model_name": "return_regressor",
+  "version": "v_20260809T053655Z",
+  "timestamp": "20260809T053655Z",
   "metrics": {
-    "avg_accuracy": 0.6784,
-    "avg_precision": 0.6914,
-    "avg_recall": 0.7144,
-    "avg_f1": 0.7018,
-    "avg_roc_auc": 0.6932,
+    "avg_mae": 1.40406,
+    "avg_rmse": 1.82282,
+    "avg_r2": 0.23684,
+    "avg_directional_accuracy": 0.6865,
     "fold_details": [
       {
         "fold": 0,
         "train_size": 74,
         "test_size": 74,
-        "accuracy": 0.4054,
-        "precision": 0.4444,
-        "recall": 0.4,
-        "f1": 0.4211,
-        "roc_auc": 0.425
+        "mae": 2.48385,
+        "rmse": 2.97334,
+        "r2": -0.39473,
+        "directional_accuracy": 0.3919
       },
       {
         "fold": 1,
         "train_size": 148,
         "test_size": 74,
-        "accuracy": 0.4459,
-        "precision": 0.5,
-        "recall": 0.561,
-        "f1": 0.5287,
-        "roc_auc": 0.4553
+        "mae": 2.01462,
+        "rmse": 2.70834,
+        "r2": -0.30829,
+        "directional_accuracy": 0.5405
       },
       {
         "fold": 2,
         "train_size": 222,
         "test_size": 74,
-        "accuracy": 0.5541,
-        "precision": 0.5366,
-        "recall": 0.6111,
-        "f1": 0.5714,
-        "roc_auc": 0.5855
+        "mae": 1.77558,
+        "rmse": 2.35186,
+        "r2": -0.00732,
+        "directional_accuracy": 0.6081
       },
       {
         "fold": 3,
         "train_size": 296,
         "test_size": 74,
-        "accuracy": 0.9865,
-        "precision": 0.9762,
-        "recall": 1.0,
-        "f1": 0.988,
-        "roc_auc": 1.0
+        "mae": 0.38905,
+        "rmse": 0.5713,
+        "r2": 0.94179,
+        "directional_accuracy": 0.9189
       },
       {
         "fold": 4,
         "train_size": 370,
         "test_size": 74,
-        "accuracy": 1.0,
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1": 1.0,
-        "roc_auc": 1.0
+        "mae": 0.3572,
+        "rmse": 0.50925,
+        "r2": 0.95277,
+        "directional_accuracy": 0.973
       }
     ]
   },
@@ -109,6 +103,5 @@
     "volume_ratio_lag_5",
     "vwap_ratio"
   ],
-  "is_champion": true,
-  "promoted_at": "2026-08-09T05:39:00.655454+00:00"
+  "is_champion": false
 }

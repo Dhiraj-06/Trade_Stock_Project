@@ -1,7 +1,8 @@
 """
 Fyers API Client Wrapper & Rolling Live Candle Buffer.
 Handles auth code flow, access token persistence, real-time quote fetching, historical candle fetching, and schema normalization.
-Provides automatic daily detection and auto-deletion of expired 24h Fyers access tokens from .env file.
+Provides automatic daily detection and auto-deletion of expired 24h Fyers access tokens from .env file,
+integrated with official FyersTokenManager for automatic refresh-token renewal.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from config.settings import FYERS, DATA, BASE_DIR
+from services.fyers_auth import get_token_manager, FYERS_AUTHENTICATED
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +61,14 @@ def _is_token_expired_error(res: dict) -> bool:
 
 
 class FyersLiveClient:
-    """Wrapper around fyers_apiv3 library with automatic token validation and auto-clearing of expired 24h tokens."""
+    """Wrapper around fyers_apiv3 library with automatic token validation and refresh-token renewal."""
 
     def __init__(self):
         self.live_dir = DATA.live_dir
         self.live_dir.mkdir(parents=True, exist_ok=True)
         self.is_authenticated = False
         self.fyers_model = None
+        self.token_manager = get_token_manager()
 
         self.reload_and_init()
 
@@ -82,7 +85,10 @@ class FyersLiveClient:
         FYERS.reload()
         self.app_id = FYERS.app_id
         self.secret_key = FYERS.secret_key
-        self.access_token = FYERS.access_token
+
+        # Verify or refresh token via TokenManager
+        auth_status = self.token_manager.reload_and_verify()
+        self.access_token = self.token_manager.access_token
 
         if self.app_id and self.access_token:
             try:
@@ -97,8 +103,21 @@ class FyersLiveClient:
                 # Validate token with test quote call
                 res = model.quotes({"symbols": "NSE:WIPRO-EQ"})
                 if _is_token_expired_error(res):
-                    logger.warning("Stored Fyers access token is expired (24h limit). Auto-clearing from .env.")
-                    self.clear_expired_token()
+                    logger.warning("Stored Fyers access token is expired. Attempting token refresh...")
+                    if self.token_manager.refresh_access_token():
+                        self.access_token = self.token_manager.access_token
+                        model = fyersModel.FyersModel(
+                            client_id=self.app_id,
+                            is_async=False,
+                            token=self.access_token,
+                            log_path=str(DATA.live_dir)
+                        )
+                        self.fyers_model = model
+                        self.is_authenticated = True
+                        logger.info("Fyers API live client refreshed & re-authenticated successfully!")
+                        return
+                    else:
+                        self.clear_expired_token()
                 else:
                     self.fyers_model = model
                     self.is_authenticated = True
@@ -121,35 +140,14 @@ class FyersLiveClient:
         return f"https://api-t1.fyers.in/api/v3/generate-authcode?client_id={clean_app_id}&redirect_uri={encoded_redirect}&response_type=code&state=fyers_auth"
 
     def exchange_code_for_token(self, auth_code: str) -> str:
-        """Exchanges auth_code for access_token, saves to .env, and initializes live connection."""
-        if not self.app_id or not self.secret_key:
-            raise ValueError("FYERS_APP_ID and FYERS_SECRET_KEY must be set in .env")
-
-        from fyers_apiv3 import fyersModel
-
-        session = fyersModel.SessionModel(
-            client_id=self.app_id,
-            secret_key=self.secret_key,
-            redirect_uri=FYERS.redirect_url,
-            response_type="code",
-            grant_type="authorization_code"
-        )
-        session.set_token(auth_code)
-        response = session.generate_token()
-
-        if response.get("s") == "ok" and response.get("access_token"):
-            token = response["access_token"]
-            _save_env_key("FYERS_ACCESS_TOKEN", token)
-            self.reload_and_init()
-            return token
-        else:
-            error_msg = response.get("message", str(response))
-            raise RuntimeError(f"Fyers token generation failed: {error_msg}")
+        """Exchanges auth_code for access_token and refresh_token via FyersTokenManager."""
+        token = self.token_manager.exchange_code_for_tokens(auth_code)
+        self.reload_and_init()
+        return token
 
     def save_access_token_directly(self, access_token: str):
-        """Directly sets and saves FYERS_ACCESS_TOKEN to .env."""
-        clean_token = access_token.strip()
-        _save_env_key("FYERS_ACCESS_TOKEN", clean_token)
+        """Directly sets and saves FYERS_ACCESS_TOKEN to server-side store and .env."""
+        self.token_manager.save_tokens(access_token)
         self.reload_and_init()
 
     def fetch_live_quote(self, symbol: str) -> dict:
@@ -161,9 +159,14 @@ class FyersLiveClient:
             try:
                 response = self.fyers_model.quotes({"symbols": fyers_symbol})
                 if _is_token_expired_error(response):
-                    logger.warning("Fyers quote response indicated expired token for %s. Clearing token.", clean_symbol)
-                    self.clear_expired_token()
-                elif response.get("s") == "ok" and response.get("d"):
+                    logger.warning("Fyers quote response indicated expired token for %s. Attempting refresh...", clean_symbol)
+                    if self.token_manager.refresh_access_token():
+                        self.reload_and_init()
+                        response = self.fyers_model.quotes({"symbols": fyers_symbol})
+                    else:
+                        self.clear_expired_token()
+
+                if response.get("s") == "ok" and response.get("d"):
                     quote_data = response["d"][0]["v"]
                     return {
                         "ticker": clean_symbol,
@@ -222,9 +225,14 @@ class FyersLiveClient:
                 }
                 response = self.fyers_model.history(data=data)
                 if _is_token_expired_error(response):
-                    logger.warning("Fyers history response indicated expired token. Clearing token.")
-                    self.clear_expired_token()
-                elif response.get("s") == "ok" and response.get("candles"):
+                    logger.warning("Fyers history response indicated expired token. Attempting refresh...")
+                    if self.token_manager.refresh_access_token():
+                        self.reload_and_init()
+                        response = self.fyers_model.history(data=data)
+                    else:
+                        self.clear_expired_token()
+
+                if response.get("s") == "ok" and response.get("candles"):
                     df = pd.DataFrame(response["candles"], columns=["epoch", "Open", "High", "Low", "Close", "Volume"])
                     date_fmt = "%Y-%m-%d %H:%M" if fyers_res != "D" else "%Y-%m-%d"
                     df["Date"] = pd.to_datetime(df["epoch"], unit="s").dt.strftime(date_fmt)

@@ -1,0 +1,16 @@
+# Environment and local credentials
+.env
+*.env
+data/live/fyers_tokens.json
+
+# Python cache & build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs & Temporary files
+*.log
+scratch/
