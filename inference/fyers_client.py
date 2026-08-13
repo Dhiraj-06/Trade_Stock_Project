@@ -274,9 +274,12 @@ class FyersLiveClient:
         candles_df = self.fetch_historical_candles(ticker, days=FYERS.live_buffer_days)
         latest_quote = self.fetch_live_quote(ticker)
 
-        # Append latest quote as newest bar
         date_fmt = "%Y-%m-%d %H:%M" if DATA.interval != "1d" else "%Y-%m-%d"
         quote_date = datetime.now(timezone.utc).strftime(date_fmt)
+
+        if not candles_df.empty:
+            candles_df["Date"] = pd.to_datetime(candles_df["Date"].astype(str), format="mixed", errors="coerce").dt.strftime(date_fmt).fillna(candles_df["Date"].astype(str))
+
         if candles_df.empty or candles_df.iloc[-1]["Date"] != quote_date:
             new_row = pd.DataFrame([{
                 "Ticker": ticker,

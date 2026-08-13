@@ -1259,3 +1259,4 @@
 {"level":"DEBUG","location":"[get_call:167] fyersModel","message":{"Status Code":200,"API":"/history"},"timestamp":"2026-08-13 17:54:22,228+0530","service":"FyersAPIRequest"}
 {"level":"DEBUG","location":"[get_call:167] fyersModel","message":{"Status Code":200,"API":"/quotes"},"timestamp":"2026-08-13 17:54:22,340+0530","service":"FyersAPIRequest"}
 {"level":"DEBUG","location":"[get_call:167] fyersModel","message":{"Status Code":200,"API":"/quotes"},"timestamp":"2026-08-13 18:00:14,504+0530","service":"FyersAPIRequest"}
+{"level":"DEBUG","location":"[get_call:167] fyersModel","message":{"Status Code":200,"API":"/quotes"},"timestamp":"2026-08-13 18:04:04,420+0530","service":"FyersAPIRequest"}

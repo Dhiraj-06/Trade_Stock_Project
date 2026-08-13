@@ -1,7 +1,7 @@
 {
   "model_name": "direction_classifier",
-  "version": "v_20260813T123013Z",
-  "timestamp": "20260813T123013Z",
+  "version": "v_20260813T123403Z",
+  "timestamp": "20260813T123403Z",
   "metrics": {
     "avg_accuracy": 0.6784,
     "avg_precision": 0.6914,
@@ -110,5 +110,5 @@
     "vwap_ratio"
   ],
   "is_champion": true,
-  "promoted_at": "2026-08-13T12:30:13.895777+00:00"
+  "promoted_at": "2026-08-13T12:34:03.770121+00:00"
 }
