@@ -77,10 +77,14 @@ class Predictor:
 
         # Extract indicator values for risk management rules
         rsi_14 = float(full_last_row.get("rsi", 50.0))
-        atr_ratio = float(full_last_row.get("atr_ratio", 0.015))
-        atr_points = round(max(0.5, current_price * atr_ratio), 2)
+        
+        # Enforce realistic 15-minute bar ATR Volatility Ratio (0.20% to 0.50% of price)
+        raw_atr_ratio = float(full_last_row.get("atr_ratio", 0.003))
+        atr_ratio = float(np.clip(raw_atr_ratio, 0.002, 0.006))
+        atr_points = round(max(0.30, current_price * atr_ratio), 2)
+        
         vol_ratio_20 = float(full_last_row.get("volume_ratio_20", 1.0))
-        volatility_20_pct = float(full_last_row.get("volatility_20", 0.015) * 100.0)
+        volatility_20_pct = float(full_last_row.get("volatility_20", 0.003) * 100.0)
 
         bb_lower_ratio = float(full_last_row.get("bb_lower_ratio", -0.02))
         bb_upper_ratio = float(full_last_row.get("bb_upper_ratio", 0.02))
