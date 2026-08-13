@@ -138,11 +138,22 @@ class Predictor:
         near_resistance = bool(raw_direction == "UP" and (resistance_20 - current_price) < (0.5 * atr_points))
         near_support = bool(raw_direction == "DOWN" and (current_price - support_20) < (0.5 * atr_points))
         
-        # Strict 30-min Intraday Entry Zone bounded around current market price (±0.4%)
+        # Strict 30-min Intraday Entry Zone bounded around current market price and Stop Loss level
         clean_supp = float(np.clip(support_20, current_price * 0.995, current_price * 0.999))
         clean_res = float(np.clip(resistance_20, current_price * 1.001, current_price * 1.005))
-        entry_low = round(min(clean_supp, clean_res), 2)
-        entry_high = round(max(clean_supp, clean_res), 2)
+        
+        if raw_direction == "UP":
+            raw_entry_low = round(min(clean_supp, clean_res), 2)
+            entry_low = max(raw_entry_low, round(atr_stop_loss + 0.10, 2))
+            entry_high = round(max(clean_supp, clean_res), 2)
+        else:
+            entry_low = round(min(clean_supp, clean_res), 2)
+            raw_entry_high = round(max(clean_supp, clean_res), 2)
+            entry_high = min(raw_entry_high, round(atr_stop_loss - 0.10, 2))
+
+        if entry_low > entry_high:
+            entry_low, entry_high = entry_high, entry_low
+
         suggested_entry_zone = f"₹{entry_low} - ₹{entry_high}"
 
         # ----------------------------------------------------------------------
