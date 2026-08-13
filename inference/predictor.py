@@ -153,27 +153,40 @@ class Predictor:
         
         required_capital = round(qty * effective_limit_price, 2)
         
-        # Calculate custom order risk & reward from proposed limit entry price to 30-min market target and stop loss
-        if raw_direction == "UP":
-            custom_profit_per_share = atr_target_price - effective_limit_price
-            custom_risk_per_share = effective_limit_price - atr_stop_loss
-        else:
-            custom_profit_per_share = effective_limit_price - atr_target_price
-            custom_risk_per_share = atr_stop_loss - effective_limit_price
+        # Check if proposed limit price breaches Stop Loss level
+        is_invalid_limit = False
+        if raw_direction == "UP" and effective_limit_price <= atr_stop_loss:
+            is_invalid_limit = True
+        elif raw_direction == "DOWN" and effective_limit_price >= atr_stop_loss:
+            is_invalid_limit = True
 
-        custom_profit_potential = round(qty * max(0.0, custom_profit_per_share), 2)
-        custom_max_risk = round(qty * max(0.10, custom_risk_per_share), 2)
-        
-        raw_custom_rr = custom_profit_potential / max(0.01, custom_max_risk)
-        custom_rr_ratio = round(float(np.clip(raw_custom_rr, 0.01, 6.0)), 2)
+        if is_invalid_limit:
+            custom_profit_potential = 0.0
+            custom_max_risk = round(qty * abs(effective_limit_price - atr_stop_loss), 2)
+            custom_rr_ratio = 0.0
+        else:
+            if raw_direction == "UP":
+                custom_profit_per_share = max(0.0, atr_target_price - effective_limit_price)
+                custom_risk_per_share = max(0.10, effective_limit_price - atr_stop_loss)
+            else:
+                custom_profit_per_share = max(0.0, effective_limit_price - atr_target_price)
+                custom_risk_per_share = max(0.10, atr_stop_loss - effective_limit_price)
+
+            custom_profit_potential = round(qty * custom_profit_per_share, 2)
+            custom_max_risk = round(qty * custom_risk_per_share, 2)
+            raw_custom_rr = custom_profit_potential / max(0.01, custom_max_risk)
+            custom_rr_ratio = round(float(np.clip(raw_custom_rr, 0.01, 6.0)), 2)
         
         is_limit_in_entry_zone = bool(entry_low <= effective_limit_price <= entry_high)
 
-        if is_limit_in_entry_zone and custom_rr_ratio >= 1.0 and capital_allocation_pct > 0:
+        if is_invalid_limit:
+            order_verdict = "🔴 ORDER REJECTED — BEYOND STOP LOSS"
+            order_advice = f"Limit Price (₹{effective_limit_price}) is equal to or beyond Stop Loss (₹{atr_stop_loss}). Set limit price between ₹{entry_low} and ₹{entry_high}."
+        elif is_limit_in_entry_zone and custom_rr_ratio >= 1.0 and capital_allocation_pct > 0:
             order_verdict = "🟢 ORDER APPROVED — EXCELLENT LIMIT ENTRY"
-            order_advice = f"Limit Price (₹{effective_limit_price}) is inside optimal Entry Zone ({suggested_entry_zone}) with a favorable Risk/Reward Ratio (1:{custom_rr_ratio})."
+            order_advice = f"Limit Price (₹{effective_limit_price}) is inside optimal Entry Zone ({suggested_entry_zone}) with a favorable Risk/Reward Ratio (1:{custom_rr_ratio:.2f})."
         elif is_limit_in_entry_zone and custom_rr_ratio < 1.0:
-            order_verdict = f"🟡 ORDER ADVISORY — POOR RISK/REWARD RATIO (1:{custom_rr_ratio})"
+            order_verdict = f"🟡 ORDER ADVISORY — POOR RISK/REWARD RATIO (1:{custom_rr_ratio:.2f})"
             order_advice = f"Limit Price (₹{effective_limit_price}) is in the zone, but 30-min expected profit (+₹{custom_profit_potential}) is smaller than Stop-Loss risk (-₹{custom_max_risk}). Set limit price closer to ₹{entry_low}."
         elif effective_limit_price > entry_high:
             order_verdict = "🟡 ORDER ADVISORY — LIMIT PRICE TOO HIGH"
