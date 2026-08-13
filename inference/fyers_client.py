@@ -20,14 +20,14 @@ from services.fyers_auth import get_token_manager, FYERS_AUTHENTICATED
 logger = logging.getLogger(__name__)
 
 NIFTY50_REALISTIC_PRICES: dict[str, float] = {
-    "ITC": 465.50,
+    "ITC": 278.50,
     "BHARTIARTL": 1939.10,
     "WIPRO": 183.10,
     "CIPLA": 1458.80,
     "RELIANCE": 1317.00,
     "JSWSTEEL": 980.00,
     "COALINDIA": 495.20,
-    "TCS": 4120.00,
+    "TCS": 2375.00,
     "INFY": 1850.00,
     "HDFCBANK": 1680.00,
     "ICICIBANK": 1220.00,
