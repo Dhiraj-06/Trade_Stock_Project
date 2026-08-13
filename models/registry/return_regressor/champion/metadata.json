@@ -1,7 +1,7 @@
 {
   "model_name": "return_regressor",
-  "version": "v_20260813T131759Z",
-  "timestamp": "20260813T131759Z",
+  "version": "v_20260813T132028Z",
+  "timestamp": "20260813T132028Z",
   "metrics": {
     "avg_mae": 1.40406,
     "avg_rmse": 1.82282,
@@ -104,5 +104,5 @@
     "vwap_ratio"
   ],
   "is_champion": true,
-  "promoted_at": "2026-08-13T13:17:59.746620+00:00"
+  "promoted_at": "2026-08-13T13:20:28.469640+00:00"
 }

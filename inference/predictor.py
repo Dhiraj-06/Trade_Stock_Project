@@ -109,7 +109,7 @@ class Predictor:
         risk_amount = abs(current_price - atr_stop_loss)
         reward_amount_30m = abs(atr_target_price - current_price)
         rr_ratio = round(float(np.clip(reward_amount_30m / max(0.10, risk_amount), 1.1, 4.0)), 2)
-        risk_reward_str = f"1:{rr_ratio}"
+        risk_reward_str = f"1:{rr_ratio:.2f}"
         passes_risk_reward_guard = bool(rr_ratio >= 1.0)
 
         # Full day potential R:R ratio
@@ -262,7 +262,7 @@ class Predictor:
                 "required_capital": required_capital,
                 "custom_profit_potential": custom_profit_potential,
                 "custom_max_risk": custom_max_risk,
-                "custom_rr_ratio": f"1:{custom_rr_ratio}",
+                "custom_rr_ratio": f"1:{custom_rr_ratio:.2f}",
                 "is_limit_in_entry_zone": is_limit_in_entry_zone,
                 "order_verdict": order_verdict,
                 "order_advice": order_advice,
