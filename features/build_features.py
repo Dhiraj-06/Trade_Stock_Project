@@ -110,9 +110,9 @@ def _build_features_single_ticker(df: pd.DataFrame) -> pd.DataFrame:
         df["day_of_week"] = df.index.dayofweek
         df["is_month_end"] = df.index.is_month_end.astype(int)
     elif "Date" in df.columns:
-        date_series = pd.to_datetime(df["Date"])
-        df["day_of_week"] = date_series.dt.dayofweek
-        df["is_month_end"] = date_series.dt.is_month_end.astype(int)
+        date_series = pd.to_datetime(df["Date"], format="mixed", errors="coerce")
+        df["day_of_week"] = date_series.dt.dayofweek.fillna(0).astype(int)
+        df["is_month_end"] = date_series.dt.is_month_end.fillna(False).astype(int)
 
     return df
 
