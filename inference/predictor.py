@@ -108,7 +108,7 @@ class Predictor:
 
         risk_amount = abs(current_price - atr_stop_loss)
         reward_amount_30m = abs(atr_target_price - current_price)
-        rr_ratio = round(float(np.clip(reward_amount_30m / max(0.10, risk_amount), 1.1, 4.0)), 2)
+        rr_ratio = round(float(np.clip(reward_amount_30m / max(0.10, risk_amount), 0.10, 6.0)), 2)
         risk_reward_str = f"1:{rr_ratio:.2f}"
         passes_risk_reward_guard = bool(rr_ratio >= 1.0)
 
