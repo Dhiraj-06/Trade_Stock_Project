@@ -153,16 +153,16 @@ class Predictor:
         
         required_capital = round(qty * effective_limit_price, 2)
         
-        # Anchor custom order stop-loss and target to proposed limit entry price
+        # Calculate custom order risk & reward from proposed limit entry price to 30-min market target and stop loss
         if raw_direction == "UP":
-            custom_target_price = effective_limit_price + reward_amount_30m
-            custom_stop_loss_price = effective_limit_price - (0.7 * atr_points)
+            custom_profit_per_share = atr_target_price - effective_limit_price
+            custom_risk_per_share = effective_limit_price - atr_stop_loss
         else:
-            custom_target_price = effective_limit_price - reward_amount_30m
-            custom_stop_loss_price = effective_limit_price + (0.7 * atr_points)
+            custom_profit_per_share = effective_limit_price - atr_target_price
+            custom_risk_per_share = atr_stop_loss - effective_limit_price
 
-        custom_profit_potential = round(qty * abs(custom_target_price - effective_limit_price), 2)
-        custom_max_risk = round(qty * abs(effective_limit_price - custom_stop_loss_price), 2)
+        custom_profit_potential = round(qty * max(0.0, custom_profit_per_share), 2)
+        custom_max_risk = round(qty * max(0.10, custom_risk_per_share), 2)
         
         raw_custom_rr = custom_profit_potential / max(0.01, custom_max_risk)
         custom_rr_ratio = round(float(np.clip(raw_custom_rr, 0.01, 6.0)), 2)
