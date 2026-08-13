@@ -176,17 +176,9 @@ class Predictor:
             custom_max_risk = round(qty * abs(effective_limit_price - atr_stop_loss), 2)
             custom_rr_ratio = 0.0
         else:
-            if raw_direction == "UP":
-                custom_profit_per_share = max(0.0, atr_target_price - effective_limit_price)
-                custom_risk_per_share = max(0.10, effective_limit_price - atr_stop_loss)
-            else:
-                custom_profit_per_share = max(0.0, effective_limit_price - atr_target_price)
-                custom_risk_per_share = max(0.10, atr_stop_loss - effective_limit_price)
-
-            custom_profit_potential = round(qty * custom_profit_per_share, 2)
-            custom_max_risk = round(qty * custom_risk_per_share, 2)
-            raw_custom_rr = custom_profit_potential / max(0.01, custom_max_risk)
-            custom_rr_ratio = round(float(np.clip(raw_custom_rr, 0.01, 6.0)), 2)
+            custom_profit_potential = round(qty * reward_amount_30m, 2)
+            custom_max_risk = round(qty * risk_amount, 2)
+            custom_rr_ratio = rr_ratio
         
         is_limit_in_entry_zone = bool(entry_low <= effective_limit_price <= entry_high)
 
