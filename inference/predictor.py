@@ -134,8 +134,9 @@ class Predictor:
         near_resistance = bool(raw_direction == "UP" and (resistance_20 - current_price) < (0.5 * atr_points))
         near_support = bool(raw_direction == "DOWN" and (current_price - support_20) < (0.5 * atr_points))
         
-        raw_low = round(min(support_20, current_price * 0.998), 2)
-        raw_high = round(max(resistance_20, current_price * 1.002), 2)
+        # Tight 30-min Intraday Entry Zone bounded around current market price (±0.4%)
+        raw_low = round(max(support_20, current_price * 0.996), 2)
+        raw_high = round(min(resistance_20, current_price * 1.004), 2)
         entry_low = min(raw_low, raw_high)
         entry_high = max(raw_low, raw_high)
         suggested_entry_zone = f"₹{entry_low} - ₹{entry_high}"
@@ -160,13 +161,16 @@ class Predictor:
         custom_max_risk = round(qty * abs(effective_limit_price - custom_stop_loss_price), 2)
         
         raw_custom_rr = custom_profit_potential / max(0.01, custom_max_risk)
-        custom_rr_ratio = round(float(np.clip(raw_custom_rr, 1.1, 4.0)), 2)
+        custom_rr_ratio = round(float(np.clip(raw_custom_rr, 0.01, 6.0)), 2)
         
         is_limit_in_entry_zone = bool(entry_low <= effective_limit_price <= entry_high or abs(effective_limit_price - current_price) / current_price < 0.005)
 
-        if is_limit_in_entry_zone and capital_allocation_pct > 0:
+        if is_limit_in_entry_zone and custom_rr_ratio >= 1.0 and capital_allocation_pct > 0:
             order_verdict = "🟢 ORDER APPROVED — EXCELLENT LIMIT ENTRY"
             order_advice = f"Limit Price (₹{effective_limit_price}) is inside optimal Entry Zone ({suggested_entry_zone}) with a favorable Risk/Reward Ratio (1:{custom_rr_ratio})."
+        elif is_limit_in_entry_zone and custom_rr_ratio < 1.0:
+            order_verdict = f"🟡 ORDER ADVISORY — POOR RISK/REWARD RATIO (1:{custom_rr_ratio})"
+            order_advice = f"Limit Price (₹{effective_limit_price}) is in the zone, but 30-min expected profit (+₹{custom_profit_potential}) is smaller than Stop-Loss risk (-₹{custom_max_risk}). Set limit price closer to ₹{entry_low}."
         elif effective_limit_price > entry_high:
             order_verdict = "🟡 ORDER ADVISORY — LIMIT PRICE TOO HIGH"
             order_advice = f"Limit Price (₹{effective_limit_price}) is above optimal entry range ({suggested_entry_zone}). Set limit price between ₹{entry_low} and ₹{entry_high}."
