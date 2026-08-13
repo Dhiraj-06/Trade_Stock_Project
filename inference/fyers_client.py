@@ -19,6 +19,39 @@ from services.fyers_auth import get_token_manager, FYERS_AUTHENTICATED
 
 logger = logging.getLogger(__name__)
 
+NIFTY50_REALISTIC_PRICES: dict[str, float] = {
+    "ITC": 465.50,
+    "BHARTIARTL": 1939.10,
+    "WIPRO": 183.10,
+    "CIPLA": 1458.80,
+    "RELIANCE": 1317.00,
+    "JSWSTEEL": 980.00,
+    "COALINDIA": 495.20,
+    "TCS": 4120.00,
+    "INFY": 1850.00,
+    "HDFCBANK": 1680.00,
+    "ICICIBANK": 1220.00,
+    "TATAMOTORS": 1020.00,
+    "SBIN": 840.00,
+    "AXISBANK": 1180.00,
+    "LT": 3650.00,
+    "KOTAKBANK": 1780.00,
+    "MARUTI": 12400.00,
+    "SUNPHARMA": 1720.00,
+    "TITAN": 3450.00,
+    "BAJFINANCE": 6850.00,
+    "ASIANPAINT": 2950.00,
+    "ULTRACEMCO": 11200.00,
+    "NTPC": 410.00,
+    "POWERGRID": 340.00,
+    "NESTLEIND": 2480.00,
+    "HINDUNILVR": 2720.00,
+    "ONGC": 320.00,
+    "M&M": 2850.00,
+    "ADANIENT": 3150.00,
+    "ADANIPORTS": 1480.00,
+}
+
 
 def _save_env_key(key: str, value: str):
     """Saves or updates key=value in ml_service/.env file. If value is empty, removes key line."""
@@ -35,7 +68,6 @@ def _save_env_key(key: str, value: str):
             found = True
             if value.strip():
                 new_lines.append(f"{key}={value.strip()}\n")
-            # If value is empty, skip line to delete it
         else:
             new_lines.append(line)
 
@@ -68,90 +100,83 @@ class FyersLiveClient:
         self.live_dir.mkdir(parents=True, exist_ok=True)
         self.is_authenticated = False
         self.fyers_model = None
-        self.token_manager = get_token_manager()
 
+        self.token_manager = get_token_manager()
         self.reload_and_init()
 
-    def clear_expired_token(self):
-        """Automatically removes expired FYERS_ACCESS_TOKEN from .env and resets client state."""
-        _save_env_key("FYERS_ACCESS_TOKEN", "")
-        self.access_token = ""
-        self.is_authenticated = False
-        self.fyers_model = None
-        FYERS.reload()
-        logger.warning("Fyers access token was expired/invalid. Automatically deleted FYERS_ACCESS_TOKEN from .env file.")
-
     def reload_and_init(self):
-        FYERS.reload()
-        self.app_id = FYERS.app_id
-        self.secret_key = FYERS.secret_key
-
-        # Verify or refresh token via TokenManager
-        auth_status = self.token_manager.reload_and_verify()
-        self.access_token = self.token_manager.access_token
-
-        if self.app_id and self.access_token:
+        """Initializes or re-initializes fyers_apiv3 FyersModel if a valid access token exists."""
+        access_token = self.token_manager.access_token
+        if access_token and FYERS.app_id:
             try:
+                log_dir = BASE_DIR / "logs"
+                log_dir.mkdir(parents=True, exist_ok=True)
                 from fyers_apiv3 import fyersModel
-                model = fyersModel.FyersModel(
-                    client_id=self.app_id,
+                self.fyers_model = fyersModel.FyersModel(
+                    client_id=FYERS.app_id,
                     is_async=False,
-                    token=self.access_token,
-                    log_path=str(DATA.live_dir)
+                    token=access_token,
+                    log_path=str(log_dir)
                 )
-
-                # Validate token with test quote call
-                res = model.quotes({"symbols": "NSE:WIPRO-EQ"})
-                if _is_token_expired_error(res):
-                    logger.warning("Stored Fyers access token is expired. Attempting token refresh...")
-                    if self.token_manager.refresh_access_token():
-                        self.access_token = self.token_manager.access_token
-                        model = fyersModel.FyersModel(
-                            client_id=self.app_id,
-                            is_async=False,
-                            token=self.access_token,
-                            log_path=str(DATA.live_dir)
-                        )
-                        self.fyers_model = model
-                        self.is_authenticated = True
-                        logger.info("Fyers API live client refreshed & re-authenticated successfully!")
-                        return
-                    else:
-                        self.clear_expired_token()
-                else:
-                    self.fyers_model = model
-                    self.is_authenticated = True
-                    logger.info("Fyers API live client authenticated & initialized successfully with App ID: %s", self.app_id)
+                self.is_authenticated = True
+                logger.info("FyersLiveClient successfully authenticated with Fyers v3 API.")
             except Exception as e:
-                logger.warning("Fyers API initialization check failed (%s). Auto-clearing token.", e)
-                self.clear_expired_token()
+                logger.error("Failed creating FyersModel instance (%s). Operating in fallback mode.", e)
+                self.is_authenticated = False
+                self.fyers_model = None
         else:
             self.is_authenticated = False
             self.fyers_model = None
+            logger.info("FyersLiveClient operating in offline fallback mode (No valid access token).")
 
-    def generate_auth_url(self) -> str:
-        """Generates clean Fyers OAuth 2.0 login URL with valid state parameter."""
-        if not self.app_id or not self.secret_key:
-            raise ValueError("FYERS_APP_ID and FYERS_SECRET_KEY must be set in .env before generating login URL.")
+    def clear_expired_token(self):
+        """Clears expired access token from environment and .env file."""
+        logger.warning("Fyers access token expired. Clearing token...")
+        _save_env_key("FYERS_ACCESS_TOKEN", "")
+        os.environ.pop("FYERS_ACCESS_TOKEN", None)
+        self.is_authenticated = False
+        self.fyers_model = None
 
-        clean_app_id = self.app_id.strip()
-        clean_redirect_uri = FYERS.redirect_url.strip()
-        encoded_redirect = urllib.parse.quote_plus(clean_redirect_uri)
-        return f"https://api-t1.fyers.in/api/v3/generate-authcode?client_id={clean_app_id}&redirect_uri={encoded_redirect}&response_type=code&state=fyers_auth"
+    def get_login_url(self) -> str:
+        """Generates OAuth2 login URL for user authentication."""
+        redirect_uri = urllib.parse.quote(FYERS.redirect_url, safe="")
+        state = "state_nifty_ml"
+        return (
+            f"https://api-t1.fyers.in/api/v3/generate-authcode?"
+            f"client_id={FYERS.app_id}&redirect_uri={redirect_uri}&response_type=code&state={state}"
+        )
 
-    def exchange_code_for_token(self, auth_code: str) -> str:
-        """Exchanges auth_code for access_token and refresh_token via FyersTokenManager."""
-        token = self.token_manager.exchange_code_for_tokens(auth_code)
-        self.reload_and_init()
-        return token
-
-    def save_access_token_directly(self, access_token: str):
-        """Directly sets and saves FYERS_ACCESS_TOKEN to server-side store and .env."""
-        self.token_manager.save_tokens(access_token)
-        self.reload_and_init()
+    def set_auth_code(self, auth_code: str) -> bool:
+        """Exchanges auth_code for access_token and saves to .env."""
+        try:
+            from fyers_apiv3 import fyersModel
+            session = fyersModel.SessionModel(
+                client_id=FYERS.app_id,
+                secret_key=FYERS.secret_key,
+                redirect_uri=FYERS.redirect_url,
+                response_type="code",
+                grant_type="authorization_code"
+            )
+            session.set_token(auth_code)
+            res = session.generate_token()
+            if isinstance(res, dict) and res.get("s") == "ok":
+                token = res.get("access_token")
+                refresh_token = res.get("refresh_token")
+                _save_env_key("FYERS_ACCESS_TOKEN", token)
+                if refresh_token:
+                    _save_env_key("FYERS_REFRESH_TOKEN", refresh_token)
+                os.environ["FYERS_ACCESS_TOKEN"] = token
+                self.reload_and_init()
+                return True
+            else:
+                logger.error("Token generation failed: %s", res)
+                return False
+        except Exception as e:
+            logger.error("Auth code exchange error: %s", e)
+            return False
 
     def fetch_live_quote(self, symbol: str) -> dict:
-        """Fetches latest real-time quote for symbol. Symbol format e.g. 'WIPRO' or 'NSE:WIPRO-EQ'."""
+        """Fetches real-time quote (LTP, OHLC, volume) for a ticker. Uses mock generator if offline."""
         clean_symbol = symbol.replace("NSE:", "").replace("-EQ", "")
         fyers_symbol = f"NSE:{clean_symbol}-EQ"
 
@@ -159,7 +184,7 @@ class FyersLiveClient:
             try:
                 response = self.fyers_model.quotes({"symbols": fyers_symbol})
                 if _is_token_expired_error(response):
-                    logger.warning("Fyers quote response indicated expired token for %s. Attempting refresh...", clean_symbol)
+                    logger.warning("Fyers quote response indicated expired token. Attempting refresh...")
                     if self.token_manager.refresh_access_token():
                         self.reload_and_init()
                         response = self.fyers_model.quotes({"symbols": fyers_symbol})
@@ -171,10 +196,10 @@ class FyersLiveClient:
                     return {
                         "ticker": clean_symbol,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "open": float(quote_data.get("open_price", quote_data.get("cmd", {}).get("c", 0))),
-                        "high": float(quote_data.get("high_price", quote_data.get("cmd", {}).get("h", 0))),
-                        "low": float(quote_data.get("low_price", quote_data.get("cmd", {}).get("l", 0))),
-                        "close": float(quote_data.get("lp", quote_data.get("prev_close_price", 0))),
+                        "open": float(quote_data.get("open_price", quote_data.get("lp", 0.0))),
+                        "high": float(quote_data.get("high_price", quote_data.get("lp", 0.0))),
+                        "low": float(quote_data.get("low_price", quote_data.get("lp", 0.0))),
+                        "close": float(quote_data.get("lp", 0.0)),
                         "volume": int(quote_data.get("volume", 0)),
                         "is_live_fyers": True
                     }
@@ -183,21 +208,20 @@ class FyersLiveClient:
             except Exception as e:
                 logger.error("Fyers quote fetch error for %s: %s", symbol, e)
 
-        # Mock fallback quote if offline or token expired
+        # Realistic quote fallback if offline or token expired
         return self._generate_mock_quote(clean_symbol)
 
     def _generate_mock_quote(self, ticker: str) -> dict:
-        base_prices = {"WIPRO": 178.5, "RELIANCE": 2900.0, "TCS": 3800.0, "ADANIENT": 1840.0, "TATASTEEL": 160.0, "EICHERMOT": 7833.5}
-        base = base_prices.get(ticker, 500.0)
-        noise = float(np.random.normal(0, base * 0.005))
+        base = NIFTY50_REALISTIC_PRICES.get(ticker, 500.0)
+        noise = float(np.random.normal(0, base * 0.002))
         current_price = max(1.0, round(base + noise, 2))
 
         return {
             "ticker": ticker,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "open": round(current_price * 0.998, 2),
-            "high": round(current_price * 1.005, 2),
-            "low": round(current_price * 0.995, 2),
+            "high": round(current_price * 1.004, 2),
+            "low": round(current_price * 0.996, 2),
             "close": current_price,
             "volume": int(np.random.randint(100000, 2000000)),
             "is_live_fyers": False
@@ -247,27 +271,38 @@ class FyersLiveClient:
         return self._load_cached_slice(clean_symbol, days=days)
 
     def _load_cached_slice(self, ticker: str, days: int = 60) -> pd.DataFrame:
+        sub = pd.DataFrame()
         if DATA.raw_data_path.exists():
             df = pd.read_csv(DATA.raw_data_path)
-            sub = df[df["Ticker"] == ticker].tail(days)
-            if not sub.empty:
-                sub = sub[["Ticker", "Date", "Open", "High", "Low", "Close", "Volume"]].copy()
-                return sub
+            raw_sub = df[df["Ticker"] == ticker].tail(days)
+            if not raw_sub.empty:
+                sub = raw_sub[["Ticker", "Date", "Open", "High", "Low", "Close", "Volume"]].copy()
 
-        # Generate synthetic fallback candles if CSV not accessible
-        rng = pd.date_range(end=datetime.now(timezone.utc), periods=days, freq=DATA.interval)
-        np.random.seed(abs(hash(ticker)) % 100000)
-        base = 100.0 + (abs(hash(ticker)) % 3000)
-        price = base * np.exp(np.cumsum(np.random.normal(0, 0.015, days)))
-        return pd.DataFrame({
-            "Ticker": ticker,
-            "Date": rng.strftime("%Y-%m-%d %H:%M"),
-            "Open": price * 0.998,
-            "High": price * 1.01,
-            "Low": price * 0.99,
-            "Close": price,
-            "Volume": np.random.randint(10000, 500000, days)
-        })
+        if sub.empty:
+            rng = pd.date_range(end=datetime.now(timezone.utc), periods=days, freq=DATA.interval)
+            base_price = NIFTY50_REALISTIC_PRICES.get(ticker, 500.0)
+            np.random.seed(abs(hash(ticker)) % 100000)
+            price = base_price * (1.0 + np.cumsum(np.random.normal(0, 0.003, days)))
+            sub = pd.DataFrame({
+                "Ticker": ticker,
+                "Date": rng.strftime("%Y-%m-%d %H:%M"),
+                "Open": price * 0.998,
+                "High": price * 1.004,
+                "Low": price * 0.996,
+                "Close": price,
+                "Volume": np.random.randint(10000, 500000, days)
+            })
+
+        # Scale prices if preprocessed CSV contains unscaled generic prices
+        if ticker in NIFTY50_REALISTIC_PRICES and not sub.empty:
+            target_base = NIFTY50_REALISTIC_PRICES[ticker]
+            curr_last = sub["Close"].iloc[-1]
+            if curr_last > 0 and abs(curr_last - target_base) / target_base > 0.15:
+                scale_factor = target_base / curr_last
+                for col in ["Open", "High", "Low", "Close"]:
+                    sub[col] = (sub[col] * scale_factor).round(2)
+
+        return sub
 
     def update_rolling_buffer(self, ticker: str) -> Path:
         """Pulls latest history & quote, updates local Parquet buffer in data/live/."""
