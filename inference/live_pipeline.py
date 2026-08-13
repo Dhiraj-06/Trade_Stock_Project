@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import pandas as pd
 
 from features.build_features import build_feature_matrix
@@ -34,13 +34,13 @@ def get_predictor() -> Predictor:
     return _predictor
 
 
-def run_live_prediction(ticker: str) -> dict[str, Any]:
+def run_live_prediction(ticker: str, custom_qty: int = 100, custom_limit_price: Optional[float] = None) -> dict[str, Any]:
     """Full live pipeline for a single ticker.
 
     1. Validate & normalize ticker string against NIFTY 50 universe.
     2. Update rolling buffer via Fyers client.
     3. Build scale-invariant features using exact build_features.py.
-    4. Generate prediction via champion models.
+    4. Generate prediction via champion models and custom Groww order analysis.
     """
     client = get_fyers_client()
     predictor = get_predictor()
@@ -64,7 +64,7 @@ def run_live_prediction(ticker: str) -> dict[str, Any]:
         raise ValueError(f"Insufficient history ({len(candles_df)} bars) to build warm-up features for {clean_ticker}")
 
     # Step 3: Run inference
-    pred_res = predictor.predict(features_df, current_price=current_price)
+    pred_res = predictor.predict(features_df, current_price=current_price, custom_qty=custom_qty, custom_limit_price=custom_limit_price)
 
     result = {
         "ticker": clean_ticker,

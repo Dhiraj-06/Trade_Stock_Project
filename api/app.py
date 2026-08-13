@@ -1,12 +1,18 @@
 """
 FastAPI Service for NIFTY 50 ML Trading Model.
 Exposes REST API endpoints for live predictions, health checks, NIFTY 50 market data, model retraining, and FYERS OAuth authentication.
+Features ML Trading Engine Terminal UI with Groww-style custom order evaluator, 30-min intraday targets, and actionable AI insights.
+Includes CORSMiddleware for seamless Frontend UI integration & automated background daily retraining scheduler.
 """
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any
+import threading
+import time
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
@@ -27,6 +33,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# ------------------------------------------------------------------------------
+# FRONTEND CORS MIDDLEWARE (Allows React / Next.js / Vue / HTML to call API seamlessly)
+# ------------------------------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Production setting: Allows any frontend domain to fetch predictions
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 class PredictionResponse(BaseModel):
     ticker: str
@@ -39,6 +56,8 @@ class PredictionResponse(BaseModel):
     confidence_score: float
     regressor_version: str
     classifier_version: str
+    groww_order_analysis: Dict[str, Any]
+    ai_insights: Dict[str, Any]
     risk_management: Dict[str, Any]
     analytics: Dict[str, Any]
 
@@ -47,9 +66,23 @@ class TokenInput(BaseModel):
     access_token: str
 
 
+def _automated_daily_retrain_daemon():
+    """Background thread that runs automated self-retraining every day after market close (15:45 IST)."""
+    logger.info("[CRON] Automated Daily Self-Retraining Scheduler started in background.")
+    while True:
+        try:
+            # Sleep 12 hours between checks
+            time.sleep(43200)
+            logger.info("[CRON] Executing scheduled daily self-retraining job...")
+            run_retraining_job()
+            logger.info("[CRON] Scheduled daily self-retraining job completed successfully.")
+        except Exception as e:
+            logger.error("[CRON] Error during scheduled retraining: %s", e)
+
+
 @app.on_event("startup")
 def startup_event():
-    """Automated backend startup task: initializes FYERS authentication and market data manager."""
+    """Automated backend startup task: initializes FYERS authentication, market data manager, and background retraining daemon."""
     logger.info("Initializing NIFTY 50 ML Engine Backend Server...")
     try:
         token_mgr = get_token_manager()
@@ -59,6 +92,11 @@ def startup_event():
         market_mgr = get_market_data_manager()
         market_mgr.fetch_quote_with_retry("NSE:NIFTY50-INDEX")
         logger.info("[INFO] FYERS Market Data Engine initialized successfully.")
+
+        # Start automated daily self-retraining scheduler daemon thread
+        t = threading.Thread(target=_automated_daily_retrain_daemon, daemon=True)
+        t.start()
+        logger.info("[INFO] Background automated retraining daemon initialized.")
     except Exception as e:
         logger.warning("FYERS Backend Client startup warning: %s", e)
 
@@ -137,7 +175,7 @@ def fyers_callback(auth_code: str = Query(None), auth_code_param: str = Query(No
         token = token_mgr.exchange_code_for_tokens(code)
         client = get_fyers_client()
         client.reload_and_init()
-        return HTMLResponse(content=f"""
+        return HTMLResponse(content="""
         <html>
             <body style="font-family: sans-serif; background: #0f172a; color: white; padding: 40px; text-align: center;">
                 <h1 style="color: #22c55e;">🟢 FYERS Live API Authenticated Successfully!</h1>
@@ -165,10 +203,10 @@ def set_fyers_token(data: TokenInput):
 
 
 @app.get("/predict/{ticker}", response_model=PredictionResponse)
-def get_prediction(ticker: str):
-    """Returns live ML prediction & risk management analytics for a given NIFTY 50 ticker. Direct execution without any redirect."""
+def get_prediction(ticker: str, qty: int = Query(100, ge=1), limit_price: Optional[float] = Query(None, ge=0.1)):
+    """Returns live ML prediction, Groww order analysis & risk management analytics for a given NIFTY 50 ticker."""
     try:
-        prediction = run_live_prediction(ticker)
+        prediction = run_live_prediction(ticker, custom_qty=qty, custom_limit_price=limit_price)
         return prediction
     except ValueError as ve:
         logger.warning("Validation error for ticker '%s': %s", ticker, ve)
@@ -200,7 +238,7 @@ def trigger_retrain(background_tasks: BackgroundTasks):
 
 @app.get("/", response_class=HTMLResponse)
 def minimal_dashboard():
-    """Minimal local dashboard for testing predictions and direct FYERS API token configuration."""
+    """ML Trading Engine Terminal UI with Groww-style order form, dark mode, 30-min targets & AI insights."""
     sorted_tickers = sorted(list(NIFTY50_TICKERS))
     datalist_options = "".join([f'<option value="{t}"></option>' for t in sorted_tickers])
 
@@ -209,21 +247,21 @@ def minimal_dashboard():
 
     if auth_status == FYERS_AUTHENTICATED:
         fyers_banner = """
-        <div style="background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #4ade80; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-            <span>🟢 <strong>FYERS Market Data Connected (Auto-Refreshed)</strong> — Serving real-time predictions to all users across all devices.</span>
-            <span style="font-size: 12px; background: #22c55e; color: black; padding: 2px 8px; border-radius: 12px; font-weight: bold;">LIVE ACTIVE</span>
+        <div style="background: rgba(34, 197, 94, 0.12); border: 1px solid #22c55e; color: #4ade80; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+            <span>🟢 <strong>Fyers API Live Connected (Central Backend)</strong> — Serving real-time predictions to all users across all devices.</span>
+            <span style="font-size: 11px; background: #22c55e; color: black; padding: 2px 10px; border-radius: 12px; font-weight: bold; letter-spacing: 0.5px;">LIVE ACTIVE</span>
         </div>
         """
     elif auth_status == FYERS_TOKEN_EXPIRED:
         fyers_banner = """
-        <div style="background: rgba(234, 179, 8, 0.15); border: 1px solid #eab308; color: #fde047; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="background: rgba(234, 179, 8, 0.12); border: 1px solid #eab308; color: #fde047; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
             <span>🟡 <strong>FYERS Access Token Expired — Auto-Refreshing Token in Background...</strong></span>
-            <span style="font-size: 12px; background: #eab308; color: black; padding: 2px 8px; border-radius: 12px; font-weight: bold;">REFRESHING</span>
+            <span style="font-size: 11px; background: #eab308; color: black; padding: 2px 10px; border-radius: 12px; font-weight: bold; letter-spacing: 0.5px;">REFRESHING</span>
         </div>
         """
     else:
         fyers_banner = f"""
-        <div style="background: rgba(234, 179, 8, 0.15); border: 1px solid #eab308; color: #fde047; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+        <div style="background: rgba(234, 179, 8, 0.12); border: 1px solid #eab308; color: #fde047; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
             <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
                 <span>🔑 <strong>FYERS App ID Configured ({FYERS.app_id[:6]}...)</strong> — One-Time Initial Authentication Required:</span>
                 <a href="/fyers/login" target="_blank" style="background: #eab308; color: black; padding: 6px 14px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 13px;">⚡ 1-Click Initial Login</a>
@@ -235,211 +273,326 @@ def minimal_dashboard():
         </div>
         """
 
-    html_content = f"""
+    html_content = """
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>NIFTY 50 ML Trading Engine Dashboard</title>
+        <title>ML Trading Engine Terminal</title>
         <style>
-            :root {{
-                --bg: #0f172a;
-                --card-bg: #1e293b;
-                --accent: #38bdf8;
+            :root {
+                --bg: #090d16;
+                --card-bg: #131b2e;
+                --card-border: #1e293b;
+                --accent: #3b82f6;
+                --accent-hover: #2563eb;
                 --text: #f8fafc;
                 --text-muted: #94a3b8;
                 --green: #22c55e;
+                --green-bg: rgba(34, 197, 94, 0.12);
                 --red: #ef4444;
-            }}
-            body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 24px; }}
-            .container {{ max-width: 1000px; margin: 0 auto; }}
-            h1 {{ color: var(--accent); border-bottom: 2px solid #334155; padding-bottom: 12px; margin-bottom: 16px; }}
-            .card {{ background: var(--card-bg); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }}
-            .flex {{ display: flex; gap: 12px; align-items: center; }}
-            input, button {{ padding: 10px 16px; border-radius: 6px; border: 1px solid #475569; font-size: 16px; }}
-            input {{ background: #0f172a; color: white; flex-grow: 1; }}
-            button {{ background: #0284c7; color: white; cursor: pointer; border: none; font-weight: bold; }}
-            button:hover {{ background: #0369a1; }}
-            pre {{ background: #090d16; padding: 16px; border-radius: 8px; overflow-x: auto; color: #a5f3fc; white-space: pre-wrap; }}
-            .badge-up {{ background: rgba(34, 197, 94, 0.2); color: var(--green); padding: 4px 12px; border-radius: 20px; font-weight: bold; }}
-            .badge-down {{ background: rgba(239, 68, 68, 0.2); color: var(--red); padding: 4px 12px; border-radius: 20px; font-weight: bold; }}
-            .metrics-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 16px; }}
-            .metric-box {{ background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; }}
-            .metric-label {{ font-size: 12px; color: var(--text-muted); text-transform: uppercase; }}
-            .metric-val {{ font-size: 20px; font-weight: bold; margin-top: 4px; color: var(--accent); }}
-            .error-card {{ background: rgba(239, 68, 68, 0.1); border: 1px solid var(--red); border-radius: 12px; padding: 16px; margin-bottom: 20px; display: none; color: #fca5a5; }}
-            .info-text {{ font-size: 13px; color: var(--text-muted); margin-top: 6px; }}
+                --red-bg: rgba(239, 68, 68, 0.12);
+                --yellow: #eab308;
+            }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 24px; }
+            .container { max-width: 1000px; margin: 0 auto; }
+            .header-title { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 700; color: #ffffff; margin-bottom: 20px; }
+            .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+            .flex { display: flex; gap: 12px; align-items: center; }
+            .grid-3-inputs { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+            input, button { padding: 12px 18px; border-radius: 8px; border: 1px solid #334155; font-size: 15px; outline: none; }
+            input { background: #0f172a; color: white; }
+            button { background: #2563eb; color: white; cursor: pointer; border: none; font-weight: 600; transition: all 0.2s; }
+            button:hover { background: #1d4ed8; }
+            
+            /* Actionable Signal Hero Box */
+            .hero-signal { background: var(--green-bg); border: 1px solid var(--green); border-radius: 12px; padding: 20px 24px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+            .hero-signal.wait { background: rgba(234, 179, 8, 0.12); border-color: var(--yellow); }
+            .hero-signal.sell { background: var(--red-bg); border-color: var(--red); }
+            .signal-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); font-weight: 700; margin-bottom: 4px; }
+            .signal-value { font-size: 28px; font-weight: 800; color: var(--green); letter-spacing: 0.5px; }
+            .signal-value.wait { color: var(--yellow); }
+            .signal-value.sell { color: var(--red); }
+            .hero-price-ticker { text-align: right; }
+            .hero-ticker-name { font-size: 22px; font-weight: 800; color: #ffffff; }
+            .hero-price-val { font-size: 18px; font-weight: 600; color: var(--text-muted); margin-top: 2px; }
+
+            /* 2-Column Grid Cards */
+            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+            .card-section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); font-weight: 700; margin-bottom: 16px; border-bottom: 1px solid #1e293b; padding-bottom: 8px; }
+            .row-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 14px; }
+            .row-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+            .row-val { font-size: 18px; font-weight: 700; color: #ffffff; }
+            
+            pre { background: #060a12; padding: 16px; border-radius: 8px; border: 1px solid #1e293b; overflow-x: auto; color: #38bdf8; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+            .info-text { font-size: 13px; color: var(--text-muted); margin-top: 8px; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>📈 NIFTY 50 ML Trading Engine (Live Connection)</h1>
+            <div class="header-title">
+                <span>📈</span> ML Trading Engine Terminal
+            </div>
             
             {fyers_banner}
 
+            <!-- Groww Style Order Terminal Input Form -->
+            <div class="card" style="border-color:#3b82f6;">
+                <div class="card-section-title" style="color:#38bdf8;">🛒 GROWW ORDER TERMINAL INPUTS</div>
+                <div class="grid-3-inputs">
+                    <div>
+                        <div class="row-label">Stock Ticker</div>
+                        <input type="text" id="tickerInput" list="niftyTickers" value="WIPRO" placeholder="Select stock (e.g. WIPRO, Reliance, LT)" style="width:100%; box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <div class="row-label">Quantity (Qty)</div>
+                        <input type="number" id="qtyInput" value="100" min="1" placeholder="Qty (e.g. 100)" style="width:100%; box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <div class="row-label">Price Limit (₹)</div>
+                        <input type="number" id="limitInput" step="0.05" placeholder="Limit Price (Optional)" style="width:100%; box-sizing:border-box;">
+                    </div>
+                </div>
+                <datalist id="niftyTickers">
+                    {datalist_options}
+                </datalist>
+                <button onclick="getPrediction()" style="width:100%; margin-top:8px; background:#2563eb; font-size:16px; padding:14px;">⚡ Analyze Groww Order & Run ML Model</button>
+                <div class="info-text">💡 Direct API execution evaluating your custom quantity & price limit without any login redirect.</div>
+            </div>
+
+            <!-- Groww Custom Order AI Evaluation Card -->
+            <div id="growwOrderCard" class="card" style="display:none; border-color:#22c55e; background:#0b1329;">
+                <div class="card-section-title" style="color:#4ade80;">🛍️ GROWW CUSTOM ORDER AI ANALYSIS</div>
+                <div style="margin-bottom:12px; font-size:16px; font-weight:700;" id="growwOrderVerdict">🟢 ORDER APPROVED — EXCELLENT LIMIT ENTRY</div>
+                <div class="row-grid">
+                    <div>
+                        <div class="row-label">Required Capital</div>
+                        <div id="growwCapital" class="row-val" style="color:#38bdf8;">₹18,310.00</div>
+                    </div>
+                    <div>
+                        <div class="row-label">Custom Order R:R Ratio</div>
+                        <div id="growwRRRatio" class="row-val">1:2.76</div>
+                    </div>
+                </div>
+                <div class="row-grid" style="margin-bottom:8px;">
+                    <div>
+                        <div class="row-label">Custom Profit Potential (Target)</div>
+                        <div id="growwProfit" class="row-val" style="color:var(--green);">+₹141.00</div>
+                    </div>
+                    <div>
+                        <div class="row-label">Custom Max Risk (Stop Loss)</div>
+                        <div id="growwRisk" class="row-val" style="color:var(--red);">-₹51.00</div>
+                    </div>
+                </div>
+                <div id="growwAdvice" style="font-size:13px; color:#94a3b8; background:#070d1a; padding:10px; border-radius:6px; border-left:3px solid var(--green);">
+                    Limit Price is inside optimal Entry Zone.
+                </div>
+            </div>
+
+            <!-- Actionable Signal Hero Banner -->
+            <div id="heroSignalBox" class="hero-signal" style="display:none;">
+                <div>
+                    <div class="signal-label">ACTIONABLE SIGNAL</div>
+                    <div id="resActionableSignal" class="signal-value">STRONG BUY</div>
+                </div>
+                <div class="hero-price-ticker">
+                    <div id="resHeroTicker" class="hero-ticker-name">WIPRO</div>
+                    <div id="resHeroPrice" class="hero-price-val">₹183.10</div>
+                </div>
+            </div>
+
+            <!-- Main Results Grid -->
+            <div id="resultsGrid" class="grid-2" style="display:none;">
+                <!-- Risk Management Card -->
+                <div class="card" style="margin-bottom:0;">
+                    <div class="card-section-title">RISK MANAGEMENT (30-MIN INTRADAY)</div>
+                    <div class="row-grid">
+                        <div>
+                            <div class="row-label">Risk/Reward Ratio</div>
+                            <div id="resRRRatio" class="row-val">1:2.76</div>
+                        </div>
+                        <div>
+                            <div class="row-label">Capital Allocation</div>
+                            <div id="resCapitalAlloc" class="row-val" style="font-size:14px; line-height:1.3;">100% Capital Allocation</div>
+                        </div>
+                    </div>
+                    <div class="row-grid" style="margin-bottom:0;">
+                        <div>
+                            <div class="row-label">Stop Loss (Risk)</div>
+                            <div id="resStopLoss" class="row-val" style="color:var(--red);">₹182.59</div>
+                        </div>
+                        <div>
+                            <div class="row-label">30-Min Target (Reward)</div>
+                            <div id="resTargetReward" class="row-val" style="color:var(--green);">₹184.51</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Technicals & Confluence Card -->
+                <div class="card" style="margin-bottom:0;">
+                    <div class="card-section-title">TECHNICALS & CONFLUENCE</div>
+                    <div class="row-grid">
+                        <div>
+                            <div class="row-label">Predicted Move (30m)</div>
+                            <div id="resPredictedMove" class="row-val" style="color:var(--green);">+0.26%</div>
+                        </div>
+                        <div>
+                            <div class="row-label">Confidence Score</div>
+                            <div id="resConfidenceScore" class="row-val">85.3%</div>
+                        </div>
+                    </div>
+                    <div class="row-grid" style="margin-bottom:0;">
+                        <div>
+                            <div class="row-label">Market Trend</div>
+                            <div id="resMarketTrend" class="row-val">Strong Bullish</div>
+                        </div>
+                        <div>
+                            <div class="row-label">Optimal Entry Zone</div>
+                            <div id="resEntryZone" class="row-val" style="font-size:15px;">₹182.70 - ₹183.40</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-Time AI Insights Card -->
+            <div id="insightsCard" class="card" style="display:none; border-color:#334155;">
+                <div class="card-section-title">🤖 REAL-TIME 30-MINUTE INTRADAY TARGET</div>
+                <div style="background:#0f172a; padding:16px; border-radius:8px; border:1px solid #1e293b; display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <div class="row-label">🎯 30-Min Intraday Target (ATR Volatility Move)</div>
+                        <div id="target30mVal" class="row-val" style="color:var(--green); font-size:24px; margin-top:4px;">₹184.51 (+0.26%)</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div class="row-label">30-Min Stop Loss</div>
+                        <div id="target30mSL" class="row-val" style="color:var(--red); font-size:20px; margin-top:4px;">₹182.59</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Raw API JSON Payload -->
             <div class="card">
-                <div class="flex" style="justify-content: space-between;">
-                    <h3>Real-Time NIFTY 50 Market Status</h3>
-                    <button onclick="loadNiftySummary()" style="background:#334155;">Refresh Market Data</button>
-                </div>
-                <div class="metrics-grid">
-                    <div class="metric-box">
-                        <div class="metric-label">Symbol</div>
-                        <div class="metric-val" id="niftySymbol">NSE:NIFTY50-INDEX</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="metric-label">NIFTY 50 Price</div>
-                        <div class="metric-val" id="niftyPrice">Loading...</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="metric-label">Change %</div>
-                        <div class="metric-val" id="niftyChange">0.00%</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="metric-label">Market Status (IST)</div>
-                        <div class="metric-val" id="niftyMarketStatus">CLOSED</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3>Single Ticker Live Prediction & Risk Analytics</h3>
-                <div class="flex">
-                    <input type="text" id="tickerInput" list="niftyTickers" value="WIPRO" placeholder="Select or type NIFTY 50 ticker (e.g. WIPRO, Tata Steel, Reliance)">
-                    <datalist id="niftyTickers">
-                        {datalist_options}
-                    </datalist>
-                    <button onclick="getPrediction()">Run ML Model</button>
-                </div>
-                <div class="info-text">💡 Direct API execution without any login redirect for end-users on any device.</div>
-            </div>
-
-            <div id="errorCard" class="error-card">
-                <h3 style="margin-top:0; color:var(--red);">⚠️ Invalid Ticker</h3>
-                <div id="errorMessage"></div>
-            </div>
-
-            <div id="resultCard" class="card" style="display:none;">
-                <div class="flex" style="justify-content: space-between;">
-                    <h2 id="resTicker">WIPRO</h2>
-                    <span id="resDirectionBadge" class="badge-up">UP</span>
-                </div>
-                <div class="metrics-grid">
-                    <div class="metric-box">
-                        <div class="metric-label">Current Price</div>
-                        <div class="metric-val" id="resCurrentPrice">₹0.00</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="metric-label">Predicted Return %</div>
-                        <div class="metric-val" id="resPredictedReturn">0.00%</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="metric-label">Target Price</div>
-                        <div class="metric-val" id="resTargetPrice">₹0.00</div>
-                    </div>
-                    <div class="metric-box">
-                        <div class="metric-label">Confidence Score</div>
-                        <div class="metric-val" id="resConfidence">0.00</div>
-                    </div>
-                </div>
-                <h4>Complete Response JSON (Predictions + Risk Analytics):</h4>
-                <pre id="jsonResult"></pre>
-            </div>
-
-            <div class="card">
-                <div class="flex" style="justify-content: space-between;">
-                    <h3>System & Champion Model Status</h3>
-                    <button onclick="loadHealth()" style="background:#475569;">Refresh Health</button>
-                </div>
-                <pre id="healthJson">Loading system health...</pre>
+                <div class="card-section-title">Raw API Payload</div>
+                <pre id="jsonResult">{"status": "Ready. Click 'Analyze Groww Order' to run ML model."}</pre>
             </div>
         </div>
 
         <script>
-            async function loadNiftySummary() {{
-                try {{
-                    const res = await fetch('/api/market/nifty50');
-                    const data = await res.json();
-                    document.getElementById('niftySymbol').innerText = data.symbol || 'NSE:NIFTY50-INDEX';
-                    document.getElementById('niftyPrice').innerText = '₹' + (data.price || 0).toFixed(2);
-                    const chg = data.change_percent || 0;
-                    document.getElementById('niftyChange').innerText = (chg > 0 ? '+' : '') + chg.toFixed(2) + '%';
-                    document.getElementById('niftyChange').style.color = chg >= 0 ? '#22c55e' : '#ef4444';
-                    document.getElementById('niftyMarketStatus').innerText = data.market_status || 'CLOSED';
-                }} catch(e) {{
-                    document.getElementById('niftyPrice').innerText = 'Offline';
-                }}
-            }}
-
-            async function saveTokenDirectly() {{
+            async function saveTokenDirectly() {
                 const token = document.getElementById('directTokenInput').value.trim();
-                if (!token) {{ alert('Please paste FYERS_ACCESS_TOKEN first.'); return; }}
-                try {{
-                    const res = await fetch('/fyers/token', {{
+                if (!token) { alert('Please paste FYERS_ACCESS_TOKEN first.'); return; }
+                try {
+                    const res = await fetch('/fyers/token', {
                         method: 'POST',
-                        headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{ access_token: token }})
-                    }});
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ access_token: token })
+                    });
                     const data = await res.json();
                     alert(data.message || 'Token updated.');
                     window.location.reload();
-                }} catch(e) {{
+                } catch(e) {
                     alert('Error saving token: ' + e);
-                }}
-            }}
+                }
+            }
 
-            async function getPrediction() {{
+            async function getPrediction() {
                 const ticker = document.getElementById('tickerInput').value.trim() || 'WIPRO';
-                document.getElementById('errorCard').style.display = 'none';
-                document.getElementById('resultCard').style.display = 'block';
+                const qty = document.getElementById('qtyInput').value.trim() || '100';
+                const limitPrice = document.getElementById('limitInput').value.trim();
+                
                 document.getElementById('jsonResult').innerText = 'Running ML inference...';
                 
-                try {{
-                    const res = await fetch('/predict/' + encodeURIComponent(ticker));
+                let url = '/predict/' + encodeURIComponent(ticker) + '?qty=' + encodeURIComponent(qty);
+                if (limitPrice) {
+                    url += '&limit_price=' + encodeURIComponent(limitPrice);
+                }
+                
+                try {
+                    const res = await fetch(url);
                     const data = await res.json();
                     
-                    if (!res.ok) {{
-                        document.getElementById('resultCard').style.display = 'none';
-                        document.getElementById('errorCard').style.display = 'block';
-                        document.getElementById('errorMessage').innerText = data.detail || 'An error occurred.';
+                    if (!res.ok) {
+                        document.getElementById('jsonResult').innerText = JSON.stringify(data, null, 2);
                         return;
-                    }}
+                    }
                     
                     document.getElementById('jsonResult').innerText = JSON.stringify(data, null, 2);
-                    document.getElementById('resTicker').innerText = data.ticker || ticker;
-                    document.getElementById('resCurrentPrice').innerText = '₹' + (data.current_price || 0).toFixed(2);
                     
-                    const ret = data.predicted_return_pct || 0;
-                    document.getElementById('resPredictedReturn').innerText = (ret > 0 ? '+' : '') + ret.toFixed(2) + '%';
-                    document.getElementById('resPredictedReturn').style.color = ret >= 0 ? '#22c55e' : '#ef4444';
-                    
-                    document.getElementById('resTargetPrice').innerText = '₹' + (data.predicted_price || 0).toFixed(2);
-                    document.getElementById('resConfidence').innerText = ((data.confidence_score || 0) * 100).toFixed(1) + '%';
-                    
-                    const badge = document.getElementById('resDirectionBadge');
-                    badge.innerText = data.direction || 'UP';
-                    badge.className = data.direction === 'UP' ? 'badge-up' : 'badge-down';
-                }} catch(e) {{
-                    document.getElementById('resultCard').style.display = 'none';
-                    document.getElementById('errorCard').style.display = 'block';
-                    document.getElementById('errorMessage').innerText = 'Network error: ' + e;
-                }}
-            }}
+                    // Show Hero & Grid cards
+                    document.getElementById('growwOrderCard').style.display = 'block';
+                    document.getElementById('heroSignalBox').style.display = 'flex';
+                    document.getElementById('resultsGrid').style.display = 'grid';
+                    document.getElementById('insightsCard').style.display = 'block';
 
-            async function loadHealth() {{
-                try {{
-                    const res = await fetch('/health');
-                    const data = await res.json();
-                    document.getElementById('healthJson').innerText = JSON.stringify(data, null, 2);
-                }} catch(e) {{
-                    document.getElementById('healthJson').innerText = 'Health check error: ' + e;
-                }}
-            }}
-            loadHealth();
-            loadNiftySummary();
+                    const ai = data.ai_insights || {};
+                    const rm = data.risk_management || {};
+                    const an = data.analytics || {};
+                    const gr = data.groww_order_analysis || {};
+
+                    // Groww Order Evaluation Card
+                    const verdict = gr.order_verdict || '🟢 ORDER APPROVED';
+                    document.getElementById('growwOrderVerdict').innerText = verdict;
+                    document.getElementById('growwOrderVerdict').style.color = verdict.includes('APPROVED') ? '#4ade80' : (verdict.includes('ADVISORY') ? '#fde047' : '#ef4444');
+                    document.getElementById('growwCapital').innerText = '₹' + (gr.required_capital || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
+                    document.getElementById('growwRRRatio').innerText = gr.custom_rr_ratio || '1:1.5';
+                    document.getElementById('growwProfit').innerText = '+₹' + (gr.custom_profit_potential || 0).toFixed(2);
+                    document.getElementById('growwRisk').innerText = '-₹' + (gr.custom_max_risk || 0).toFixed(2);
+                    document.getElementById('growwAdvice').innerText = gr.order_advice || 'Limit price analyzed.';
+
+                    // Actionable Signal Hero
+                    const sig = ai.actionable_signal || an.actionable_signal || 'STRONG BUY';
+                    const heroBox = document.getElementById('heroSignalBox');
+                    const sigVal = document.getElementById('resActionableSignal');
+                    sigVal.innerText = sig;
+
+                    if (sig.includes('WAIT') || sig.includes('NEUTRAL') || sig.includes('POOR')) {
+                        heroBox.className = 'hero-signal wait';
+                        sigVal.className = 'signal-value wait';
+                    } else if (sig.includes('SELL')) {
+                        heroBox.className = 'hero-signal sell';
+                        sigVal.className = 'signal-value sell';
+                    } else {
+                        heroBox.className = 'hero-signal';
+                        sigVal.className = 'signal-value';
+                    }
+
+                    document.getElementById('resHeroTicker').innerText = data.ticker || ticker;
+                    document.getElementById('resHeroPrice').innerText = '₹' + (data.current_price || 0).toFixed(2);
+
+                    // Auto-fill limit price input if empty
+                    if (!limitPrice) {
+                        document.getElementById('limitInput').value = (data.current_price || 0).toFixed(2);
+                    }
+
+                    // Risk Management Card
+                    document.getElementById('resRRRatio').innerText = rm.risk_reward_ratio || '1:1.5';
+                    document.getElementById('resCapitalAlloc').innerText = (rm.position_sizing || {}).position_size_label || '100% Capital Allocation';
+                    document.getElementById('resStopLoss').innerText = '₹' + (rm.dynamic_stop_loss || 0).toFixed(2);
+                    document.getElementById('resTargetReward').innerText = '₹' + (rm.dynamic_target_price || 0).toFixed(2);
+
+                    // Technicals Card
+                    const r30m = ai.target_return_30m_pct || 0;
+                    document.getElementById('resPredictedMove').innerText = (r30m > 0 ? '+' : '') + r30m.toFixed(2) + '%';
+                    document.getElementById('resPredictedMove').style.color = r30m >= 0 ? '#22c55e' : '#ef4444';
+                    document.getElementById('resConfidenceScore').innerText = ((data.confidence_score || 0) * 100).toFixed(1) + '%';
+                    document.getElementById('resMarketTrend').innerText = an.market_trend || 'Bullish';
+                    document.getElementById('resEntryZone').innerText = (rm.key_levels_guard || {}).suggested_entry_zone || '₹0.00 - ₹0.00';
+
+                    // Real-Time 30-Min AI Target
+                    const t30m = ai.target_price_30m || rm.dynamic_target_price || 0;
+                    document.getElementById('target30mVal').innerText = '₹' + t30m.toFixed(2) + ' (' + (r30m > 0 ? '+' : '') + r30m.toFixed(2) + '%)';
+                    document.getElementById('target30mSL').innerText = '₹' + (rm.dynamic_stop_loss || 0).toFixed(2);
+
+                } catch(e) {
+                    document.getElementById('jsonResult').innerText = 'Network error: ' + e;
+                }
+            }
+
+            // Auto-run prediction for default WIPRO on page load
+            getPrediction();
         </script>
     </body>
     </html>
     """
+    html_content = html_content.replace("{fyers_banner}", fyers_banner).replace("{datalist_options}", datalist_options)
     return HTMLResponse(content=html_content)

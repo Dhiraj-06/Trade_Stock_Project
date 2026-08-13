@@ -48,3 +48,5 @@
 {"level":"ERROR","location":"[get_call:173] fyersModel","message":{"API":"/quotes","Error":{"message":"Please provide valid token","code":-15,"s":"error"}},"timestamp":"2026-08-09 11:17:10,009+0530","service":"FyersAPI"}
 {"level":"ERROR","location":"[get_call:173] fyersModel","message":{"API":"/quotes","Error":{"message":"Please provide valid token","code":-15,"s":"error"}},"timestamp":"2026-08-09 11:17:12,817+0530","service":"FyersAPI"}
 {"level":"ERROR","location":"[get_call:173] fyersModel","message":{"API":"/quotes","Error":{"message":"Please provide valid token","code":-15,"s":"error"}},"timestamp":"2026-08-09 11:17:15,056+0530","service":"FyersAPI"}
+{"level":"ERROR","location":"[get_call:173] fyersModel","message":{"API":"/quotes","Error":{"message":"Please provide valid token","code":-15,"s":"error"}},"timestamp":"2026-08-10 21:12:28,233+0530","service":"FyersAPI"}
+{"level":"ERROR","location":"[get_call:173] fyersModel","message":{"API":"/quotes","Error":{"message":"Please provide valid token","code":-15,"s":"error"}},"timestamp":"2026-08-13 11:49:43,211+0530","service":"FyersAPI"}
