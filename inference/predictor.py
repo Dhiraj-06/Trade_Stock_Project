@@ -134,11 +134,11 @@ class Predictor:
         near_resistance = bool(raw_direction == "UP" and (resistance_20 - current_price) < (0.5 * atr_points))
         near_support = bool(raw_direction == "DOWN" and (current_price - support_20) < (0.5 * atr_points))
         
-        # Tight 30-min Intraday Entry Zone bounded around current market price (±0.4%)
-        raw_low = round(max(support_20, current_price * 0.996), 2)
-        raw_high = round(min(resistance_20, current_price * 1.004), 2)
-        entry_low = min(raw_low, raw_high)
-        entry_high = max(raw_low, raw_high)
+        # Strict 30-min Intraday Entry Zone bounded around current market price (±0.4%)
+        clean_supp = float(np.clip(support_20, current_price * 0.995, current_price * 0.999))
+        clean_res = float(np.clip(resistance_20, current_price * 1.001, current_price * 1.005))
+        entry_low = round(min(clean_supp, clean_res), 2)
+        entry_high = round(max(clean_supp, clean_res), 2)
         suggested_entry_zone = f"₹{entry_low} - ₹{entry_high}"
 
         # ----------------------------------------------------------------------
@@ -163,7 +163,7 @@ class Predictor:
         raw_custom_rr = custom_profit_potential / max(0.01, custom_max_risk)
         custom_rr_ratio = round(float(np.clip(raw_custom_rr, 0.01, 6.0)), 2)
         
-        is_limit_in_entry_zone = bool(entry_low <= effective_limit_price <= entry_high or abs(effective_limit_price - current_price) / current_price < 0.005)
+        is_limit_in_entry_zone = bool(entry_low <= effective_limit_price <= entry_high)
 
         if is_limit_in_entry_zone and custom_rr_ratio >= 1.0 and capital_allocation_pct > 0:
             order_verdict = "🟢 ORDER APPROVED — EXCELLENT LIMIT ENTRY"
