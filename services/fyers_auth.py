@@ -167,9 +167,12 @@ class FyersTokenManager:
                 return True
             else:
                 error_msg = response.get("message", str(response)) if isinstance(response, dict) else str(response)
-                logger.warning("[WARNING] FYERS refresh token exchange returned non-ok: %s", error_msg)
+                logger.info("[INFO] FYERS refresh token expired or invalid (%s). Cleared tokens for clean offline fallback mode.", error_msg)
+                self.access_token = ""
+                self.refresh_token = ""
                 self.status = FYERS_REAUTH_REQUIRED
-                self.last_error = f"Refresh failed: {error_msg}"
+                self.last_error = f"Re-authentication required: {error_msg}"
+                _save_env_updates({"FYERS_ACCESS_TOKEN": "", "FYERS_REFRESH_TOKEN": ""})
                 return False
         except Exception as e:
             logger.error("[ERROR] Token refresh failed: %s", e)

@@ -157,10 +157,11 @@ def fyers_login():
     """Optional OAuth 2.0 Login redirect URL generator."""
     client = get_fyers_client()
     try:
-        auth_url = client.generate_auth_url()
+        auth_url = client.get_login_url()
         return RedirectResponse(url=auth_url)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error("Error generating FYERS login URL: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed generating login URL: {e}")
 
 
 @app.get("/fyers/callback")

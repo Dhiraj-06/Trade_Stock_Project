@@ -146,6 +146,10 @@ class FyersLiveClient:
             f"client_id={FYERS.app_id}&redirect_uri={redirect_uri}&response_type=code&state={state}"
         )
 
+    def generate_auth_url(self) -> str:
+        """Alias method for get_login_url."""
+        return self.get_login_url()
+
     def set_auth_code(self, auth_code: str) -> bool:
         """Exchanges auth_code for access_token and saves to .env."""
         try:
